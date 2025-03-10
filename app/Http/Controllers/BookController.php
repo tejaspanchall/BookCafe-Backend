@@ -9,7 +9,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class BookController extends Controller
 {
-
+    // Add a new book (teachers only)
     public function add(Request $request)
     {
         if (Auth::user()->role !== 'teacher') {
@@ -32,6 +32,7 @@ class BookController extends Controller
         ], Response::HTTP_CREATED);
     }
 
+    // Get all books
     public function getBooks()
     {
         $books = Book::all();
@@ -41,6 +42,7 @@ class BookController extends Controller
         ]);
     }
 
+    // Get books in library (for teachers)
     public function getLibrary()
     {
         if (Auth::user()->role !== 'teacher') {
@@ -54,6 +56,7 @@ class BookController extends Controller
         ]);
     }
 
+    // Get user's library
     public function myLibrary()
     {
         $books = Auth::user()->books;
@@ -63,6 +66,7 @@ class BookController extends Controller
         ]);
     }
 
+    // Add book to user's library
     public function addToLibrary(Book $book)
     {
         $user = Auth::user();
@@ -81,6 +85,7 @@ class BookController extends Controller
         ]);
     }
 
+    // Remove book from user's library
     public function removeFromLibrary(Book $book)
     {
         $user = Auth::user();
@@ -99,6 +104,55 @@ class BookController extends Controller
         ]);
     }
 
+    // Delete book (teachers only)
+    public function deleteBook(Book $book)
+    {
+        if (Auth::user()->role !== 'teacher') {
+            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $book->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Book deleted successfully'
+        ]);
+    }
+
+    // Update book (teachers only)
+    public function updateBook(Request $request, Book $book)
+    {
+        if (Auth::user()->role !== 'teacher') {
+            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $validatedData = $request->validate([
+                'title' => 'sometimes|required|string|max:255',
+                'author' => 'sometimes|required|string|max:100',
+                'isbn' => 'sometimes|required|string|max:20|unique:books,isbn,' . $book->id,
+                'description' => 'sometimes|nullable|string',
+                'image' => 'sometimes|nullable|string|max:255'
+            ]);
+
+            $book->update($validatedData);
+            $book->refresh();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Book updated successfully',
+                'book' => $book
+            ], Response::HTTP_OK);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to update book',
+                'error' => $e->getMessage()
+            ], Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    // Search books
     public function search(Request $request)
     {
         $request->validate([
@@ -118,4 +172,4 @@ class BookController extends Controller
             'books' => $books
         ]);
     }
-}
+} 

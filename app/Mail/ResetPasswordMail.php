@@ -16,12 +16,18 @@ class ResetPasswordMail extends Mailable
     public $resetToken;
     public $user;
 
+    /**
+     * Create a new message instance.
+     */
     public function __construct($user, $resetToken)
     {
         $this->user = $user;
         $this->resetToken = $resetToken;
     }
 
+    /**
+     * Get the message envelope.
+     */
     public function envelope(): Envelope
     {
         return new Envelope(
@@ -29,6 +35,9 @@ class ResetPasswordMail extends Mailable
         );
     }
 
+    /**
+     * Get the message content definition.
+     */
     public function content(): Content
     {
         return new Content(

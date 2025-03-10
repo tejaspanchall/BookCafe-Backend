@@ -22,6 +22,9 @@ class Book extends Model
         'author'
     ];
 
+    /**
+     * Get the users that have this book in their library.
+     */
     public function users()
     {
         return $this->belongsToMany(User::class, 'user_books');
