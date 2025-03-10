@@ -1,233 +1,66 @@
-# Laravel Project Setup with PostgreSQL
+<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
-## Prerequisites
-Ensure you have the following installed on your system:
+<p align="center">
+<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
+<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
+</p>
 
-- PHP (>= 8.0)
-- Composer
-- Laravel CLI
-- PostgreSQL
+## About Laravel
 
-## Installation Steps
+Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
 
-### 1. Clone the Repository
-```bash
-git clone <repository-url>
-cd <project-directory>
-```
+- [Simple, fast routing engine](https://laravel.com/docs/routing).
+- [Powerful dependency injection container](https://laravel.com/docs/container).
+- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
+- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
+- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
+- [Robust background job processing](https://laravel.com/docs/queues).
+- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
 
-### 2. Install PHP Dependencies
-```bash
-composer install
-```
+Laravel is accessible, powerful, and provides tools required for large, robust applications.
 
-### 3. Configure Environment Variables
-Copy the `.env.example` file to `.env`:
-```bash
-cp .env.example .env
-```
-Update the `.env` file with your PostgreSQL database credentials:
-```ini
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=your_database_name
-DB_USERNAME=your_database_user
-DB_PASSWORD=your_database_password
-```
+## Learning Laravel
 
-### 4. Create and Setup the Database
-Ensure PostgreSQL is running, then create the database manually or using the command:
-```sql
-CREATE DATABASE your_database_name;
-```
-Run migrations to create tables:
-```bash
-php artisan migrate
-```
+Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
 
-### 5. Generate Application Key
-```bash
-php artisan key:generate
-```
+You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
 
-### 6. Start the Development Server
-```bash
-php artisan serve
-```
-The application should now be running at `http://127.0.0.1:8000`.
+If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
 
-## Additional Commands
+## Laravel Sponsors
 
-### Clearing Cache
-```bash
-php artisan cache:clear
-php artisan config:clear
-php artisan route:clear
-php artisan view:clear
-```
+We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
 
----
-Your Laravel backend is now set up with PostgreSQL! 🚀
+### Premium Partners
 
-# API Documentation
+- **[Vehikl](https://vehikl.com/)**
+- **[Tighten Co.](https://tighten.co)**
+- **[WebReinvent](https://webreinvent.com/)**
+- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
+- **[64 Robots](https://64robots.com)**
+- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
+- **[Cyber-Duck](https://cyber-duck.co.uk)**
+- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
+- **[Jump24](https://jump24.co.uk)**
+- **[Redberry](https://redberry.international/laravel/)**
+- **[Active Logic](https://activelogic.com)**
+- **[byte5](https://byte5.de)**
+- **[OP.GG](https://op.gg)**
 
-## BASE_URL
-Your API base URL (e.g., `http://localhost:8000/api`)
+## Contributing
 
-## TOKEN
-This will store your authentication token after login.
+Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
 
-## Authentication Endpoints (`/api/auth/...`)
+## Code of Conduct
 
-### Register
-**POST** `{{BASE_URL}}/auth/register`
+In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
 
-**Body (JSON):**
-```json
-{
-    "firstname": "John",
-    "lastname": "Doe",
-    "email": "john@example.com",
-    "password": "password123",
-    "role": "teacher"  // or "student"
-}
-```
+## Security Vulnerabilities
 
-### Login
-**POST** `{{BASE_URL}}/auth/login`
+If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
 
-**Body (JSON):**
-```json
-{
-    "email": "john@example.com",
-    "password": "password123"
-}
-```
+## License
 
-### Forgot Password
-**POST** `{{BASE_URL}}/auth/forgot-password`
-
-**Body (JSON):**
-```json
-{
-    "email": "john@example.com"
-}
-```
-
-### Reset Password
-**POST** `{{BASE_URL}}/auth/reset-password`
-
-**Body (JSON):**
-```json
-{
-    "token": "reset_token_received_in_email",
-    "password": "newpassword123"
-}
-```
-
-### Logout (Requires Authentication)
-**POST** `{{BASE_URL}}/auth/logout`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
----
-
-## Book Endpoints (All require Authentication - add Bearer token)
-
-### Add Book (Teachers only)
-**POST** `{{BASE_URL}}/books/add`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-**Body (JSON):**
-```json
-{
-    "title": "Book Title",
-    "author": "Author Name",
-    "isbn": "978-3-16-148410-0",
-    "description": "Book description",
-    "image": "http://image-url.com/book.jpg"  // optional
-}
-```
-
-### Get All Books
-**GET** `{{BASE_URL}}/books/get-books`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-### Get Library (Teachers only)
-**GET** `{{BASE_URL}}/books/get-library`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-### Get My Library
-**GET** `{{BASE_URL}}/books/my-library`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-### Add Book to Library
-**POST** `{{BASE_URL}}/books/{book_id}/add-to-library`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-### Remove Book from Library
-**DELETE** `{{BASE_URL}}/books/{book_id}/remove-from-library`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-### Update Book (Teachers only)
-**PUT** `{{BASE_URL}}/books/{book_id}`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-**Body (JSON):**
-```json
-{
-    "title": "Updated Title",
-    "author": "Updated Author",
-    "isbn": "978-3-16-148410-1",
-    "description": "Updated description",
-    "image": "http://image-url.com/updated.jpg"
-}
-```
-*Note: All fields are optional in update*
-
-### Delete Book (Teachers only)
-**DELETE** `{{BASE_URL}}/books/{book_id}`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
-```
-
-### Search Books
-**GET** `{{BASE_URL}}/books/search?query=search_term`
-
-**Headers:**
-```
-Authorization: Bearer {{TOKEN}}
+The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).

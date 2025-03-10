@@ -4,6 +4,10 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\BookController;
 
+Route::prefix('books')->group(function () {
+    Route::get('/search', [BookController::class, 'search']);
+});
+
 Route::prefix('auth')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/login', [AuthController::class, 'login']);
@@ -18,7 +22,6 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('books')->group(function () {
         Route::get('/get-books', [BookController::class, 'getBooks']);
-        Route::get('/search', [BookController::class, 'search']);
         Route::get('/my-library', [BookController::class, 'myLibrary']);
         Route::post('/{book}/add-to-library', [BookController::class, 'addToLibrary']);
         Route::delete('/{book}/remove-from-library', [BookController::class, 'removeFromLibrary']);
