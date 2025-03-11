@@ -6,6 +6,7 @@ use App\Http\Controllers\BookController;
 
 Route::prefix('books')->group(function () {
     Route::get('/search', [BookController::class, 'search']);
+    Route::get('/get-books', [BookController::class, 'getBooks']);
 });
 
 Route::prefix('auth')->group(function () {
@@ -21,7 +22,6 @@ Route::prefix('auth')->group(function () {
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('books')->group(function () {
-        Route::get('/get-books', [BookController::class, 'getBooks']);
         Route::get('/my-library', [BookController::class, 'myLibrary']);
         Route::post('/{book}/add-to-library', [BookController::class, 'addToLibrary']);
         Route::delete('/{book}/remove-from-library', [BookController::class, 'removeFromLibrary']);
