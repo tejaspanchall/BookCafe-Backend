@@ -29,4 +29,17 @@ class Book extends Model
     {
         return $this->belongsToMany(User::class, 'user_books');
     }
+
+    /**
+     * Get the image URL for the book.
+     *
+     * @return string|null
+     */
+    protected function getImageAttribute($value)
+    {
+        if (!$value) {
+            return null;
+        }
+        return 'books/' . $value;
+    }
 }

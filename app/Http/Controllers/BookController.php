@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Book;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
 class BookController extends Controller
@@ -21,10 +22,25 @@ class BookController extends Controller
             'author' => 'required|string|max:100',
             'isbn' => 'required|string|max:20|unique:books',
             'description' => 'nullable|string',
-            'image' => 'nullable|string|max:255'
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
         ]);
 
-        $book = Book::create($validatedData);
+        $bookData = [
+            'title' => $validatedData['title'],
+            'author' => $validatedData['author'],
+            'isbn' => $validatedData['isbn'],
+            'description' => $validatedData['description'] ?? null,
+            'image' => null
+        ];
+
+        if ($request->hasFile('image')) {
+            $image = $request->file('image');
+            $imageName = time() . '_' . $image->getClientOriginalName();
+            $image->storeAs('books', $imageName, 'public');
+            $bookData['image'] = $imageName;
+        }
+
+        $book = Book::create($bookData);
 
         return response()->json([
             'status' => 'success',
@@ -132,10 +148,24 @@ class BookController extends Controller
                 'author' => 'sometimes|required|string|max:100',
                 'isbn' => 'sometimes|required|string|max:20|unique:books,isbn,' . $book->id,
                 'description' => 'sometimes|nullable|string',
-                'image' => 'sometimes|nullable|string|max:255'
+                'image' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
             ]);
 
-            $book->update($validatedData);
+            $updateData = collect($validatedData)->except('image')->toArray();
+
+            if ($request->hasFile('image')) {
+                // Delete old image if exists
+                if ($book->image) {
+                    Storage::disk('public')->delete('books/' . $book->image);
+                }
+                
+                $image = $request->file('image');
+                $imageName = time() . '_' . $image->getClientOriginalName();
+                $image->storeAs('books', $imageName, 'public');
+                $updateData['image'] = $imageName;
+            }
+
+            $book->update($updateData);
             $book->refresh();
 
             return response()->json([
@@ -171,5 +201,33 @@ class BookController extends Controller
             'status' => 'success',
             'books' => $books
         ]);
+    }
+
+    // Delete a book
+    public function delete(Book $book)
+    {
+        if (Auth::user()->role !== 'teacher') {
+            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            // Delete the image file if it exists
+            if ($book->image) {
+                Storage::delete('public/books/' . $book->image);
+            }
+
+            $book->delete();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Book deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to delete book',
+                'error' => $e->getMessage()
+            ], Response::HTTP_BAD_REQUEST);
+        }
     }
 } 
