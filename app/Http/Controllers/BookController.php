@@ -10,7 +10,6 @@ use Symfony\Component\HttpFoundation\Response;
 
 class BookController extends Controller
 {
-    // Add a new book (teachers only)
     public function add(Request $request)
     {
         if (Auth::user()->role !== 'teacher') {
@@ -48,7 +47,6 @@ class BookController extends Controller
         ], Response::HTTP_CREATED);
     }
 
-    // Get all books
     public function getBooks()
     {
         $books = Book::all();
@@ -58,7 +56,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Get books in library (for teachers)
     public function getLibrary()
     {
         if (Auth::user()->role !== 'teacher') {
@@ -72,7 +69,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Get user's library
     public function myLibrary()
     {
         $books = Auth::user()->books;
@@ -82,7 +78,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Add book to user's library
     public function addToLibrary(Book $book)
     {
         $user = Auth::user();
@@ -101,7 +96,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Remove book from user's library
     public function removeFromLibrary(Book $book)
     {
         $user = Auth::user();
@@ -120,7 +114,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Delete book (teachers only)
     public function deleteBook(Book $book)
     {
         if (Auth::user()->role !== 'teacher') {
@@ -135,7 +128,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Update book (teachers only)
     public function updateBook(Request $request, Book $book)
     {
         if (Auth::user()->role !== 'teacher') {
@@ -154,7 +146,6 @@ class BookController extends Controller
             $updateData = collect($validatedData)->except('image')->toArray();
 
             if ($request->hasFile('image')) {
-                // Delete old image if exists
                 if ($book->image) {
                     Storage::disk('public')->delete('books/' . $book->image);
                 }
@@ -182,7 +173,6 @@ class BookController extends Controller
         }
     }
 
-    // Search books
     public function search(Request $request)
     {
         $request->validate([
@@ -203,7 +193,6 @@ class BookController extends Controller
         ]);
     }
 
-    // Delete a book
     public function delete(Book $book)
     {
         if (Auth::user()->role !== 'teacher') {
@@ -211,7 +200,6 @@ class BookController extends Controller
         }
 
         try {
-            // Delete the image file if it exists
             if ($book->image) {
                 Storage::delete('public/books/' . $book->image);
             }
