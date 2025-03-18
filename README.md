@@ -1,76 +1,87 @@
-# Laravel Project Setup with PostgreSQL
+# BookCafe Backend API
+
+A robust and scalable Laravel-based RESTful API for a modern online bookstore application.
+
+## Frontend Repository
+
+The frontend for this project is available at: [BookCafe-Frontend](https://github.com/tejaspanchall/BookCafe-Frontend)
+
+## Database Schema
+
+The database schema SQL file is available at: [database/schema.sql](database/schema.sql)
+
+You can import this file into your PostgreSQL database to create the required tables and relationships.
+
+## Features
+
+- 📚 Book management system
+- 👥 User authentication and authorization with Sanctum
+- 🔍 Advanced search and filtering
+- 🔒 Robust security features
+
+## Technologies Used
+
+- **Framework**: Laravel 12
+- **PHP Version**: 8.2+
+- **Database**: PostgreSQL
+- **Authentication**: Laravel Sanctum
+- **Queue System**: Laravel Queue with Database Driver
+- **File Storage**: Laravel Storage
 
 ## Prerequisites
-Ensure you have the following installed on your system:
 
-- PHP (>= 8.0)
+- PHP 8.2 or higher
 - Composer
-- Laravel CLI
 - PostgreSQL
+- Node.js & NPM (for asset compilation)
 
-## Installation Steps
+## Getting Started
 
-### 1. Clone the Repository
+1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd <project-directory>
+git clone https://github.com/tejaspanchall/BookCafe-Backend.git
+cd BookCafe-Backend
 ```
 
-### 2. Install PHP Dependencies
+2. Install dependencies:
 ```bash
 composer install
 ```
+
+3. Set up environment variables:
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+4. Update the `.env` file with your database credentials:
+```env
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=bookstore
+DB_USERNAME=postgres
+DB_PASSWORD=your_password
+```
+
+5. Run database migrations and seeders:
+```bash
+php artisan migrate
+php artisan db:seed
+```
+
+6. Create a symbolic link for storage:
 ```bash
 php artisan storage:link
 ```
 
-
-
-### 3. Configure Environment Variables
-Copy the `.env.example` file to `.env`:
-```bash
-cp .env.example .env
-```
-Update the `.env` file with your PostgreSQL database credentials:
-```ini
-DB_CONNECTION=pgsql
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_DATABASE=your_database_name
-DB_USERNAME=your_database_user
-DB_PASSWORD=your_database_password
-```
-
-### 4. Create and Setup the Database
-Ensure PostgreSQL is running, then create the database manually or using the command:
-```sql
-CREATE DATABASE your_database_name;
-```
-Run migrations to create tables:
-```bash
-php artisan migrate
-```
-
-### 5. Generate Application Key
-```bash
-php artisan key:generate
-```
-
-### 6. Start the Development Server
+7. Start the development server:
 ```bash
 php artisan serve
 ```
-The application should now be running at `http://127.0.0.1:8000`.
 
-## Additional Commands
+The API will be available at `http://localhost:8000/api`
 
-### Clearing Cache
-```bash
-php artisan cache:clear
-php artisan config:clear
-php artisan route:clear
-php artisan view:clear
-```
+## License
 
----
-Your Laravel backend is now set up with PostgreSQL! 🚀
+This project is licensed under the MIT License - see the LICENSE file for details.
