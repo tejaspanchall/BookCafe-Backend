@@ -13,7 +13,9 @@ CREATE TABLE books (
     image VARCHAR(255),
     description TEXT,
     isbn VARCHAR(20) UNIQUE NOT NULL,
-    author VARCHAR(100) NOT NULL
+    author VARCHAR(100) NOT NULL,
+    category VARCHAR(50),
+    price DECIMAL(10,2)
 );
 
 CREATE TABLE user_books (

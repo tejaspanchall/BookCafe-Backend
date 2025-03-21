@@ -10,6 +10,13 @@ class Book extends Model
     use HasFactory;
 
     /**
+     * Indicates if the model should be timestamped.
+     *
+     * @var bool
+     */
+    public $timestamps = false;
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
@@ -19,7 +26,9 @@ class Book extends Model
         'image',
         'description',
         'isbn',
-        'author'
+        'author',
+        'category',
+        'price'
     ];
 
     /**

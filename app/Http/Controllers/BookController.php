@@ -21,6 +21,24 @@ class BookController extends Controller
     private function clearBookCache() {
         Cache::forget($this->getCacheKey('all'));
         Cache::forget($this->getCacheKey('teacher_library'));
+        
+        // Clear search cache
+        $searchPattern = 'books:search:*';
+        $keys = Cache::get($searchPattern);
+        if ($keys) {
+            foreach ($keys as $key) {
+                Cache::forget($key);
+            }
+        }
+        
+        // Clear user libraries cache
+        $userLibraryPattern = 'books:user_library:*';
+        $keys = Cache::get($userLibraryPattern);
+        if ($keys) {
+            foreach ($keys as $key) {
+                Cache::forget($key);
+            }
+        }
     }
 
     public function add(Request $request)
@@ -34,7 +52,9 @@ class BookController extends Controller
             'author' => 'required|string|max:100',
             'isbn' => 'required|string|max:20|unique:books',
             'description' => 'nullable|string',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'category' => 'nullable|string|max:50',
+            'price' => 'nullable|numeric|min:0'
         ]);
 
         $bookData = [
@@ -42,6 +62,8 @@ class BookController extends Controller
             'author' => $validatedData['author'],
             'isbn' => $validatedData['isbn'],
             'description' => $validatedData['description'] ?? null,
+            'category' => $validatedData['category'] ?? null,
+            'price' => $validatedData['price'] ?? null,
             'image' => null
         ];
 
@@ -171,7 +193,9 @@ class BookController extends Controller
                 'author' => 'sometimes|required|string|max:100',
                 'isbn' => 'sometimes|required|string|max:20|unique:books,isbn,' . $book->id,
                 'description' => 'sometimes|nullable|string',
-                'image' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
+                'image' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+                'category' => 'sometimes|nullable|string|max:50',
+                'price' => 'sometimes|nullable|numeric|min:0'
             ]);
 
             $updateData = collect($validatedData)->except('image')->toArray();
@@ -190,7 +214,6 @@ class BookController extends Controller
             $book->update($updateData);
             $book->refresh();
             
-            // Clear books cache
             $this->clearBookCache();
 
             return response()->json([
@@ -221,6 +244,7 @@ class BookController extends Controller
                 ->orWhere('author', 'ILIKE', "%{$query}%")
                 ->orWhere('isbn', 'ILIKE', "%{$query}%")
                 ->orWhere('description', 'ILIKE', "%{$query}%")
+                ->orWhere('category', 'ILIKE', "%{$query}%")
                 ->get();
         });
 
