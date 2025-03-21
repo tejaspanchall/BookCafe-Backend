@@ -6,10 +6,23 @@ use App\Models\Book;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
 
 class BookController extends Controller
 {
+    private $cacheExpiration = 3600; // 1 hour
+    private $searchCacheExpiration = 300; // 5 minutes
+
+    private function getCacheKey($type, $identifier = null) {
+        return 'books:' . $type . ($identifier ? ':' . $identifier : '');
+    }
+
+    private function clearBookCache() {
+        Cache::forget($this->getCacheKey('all'));
+        Cache::forget($this->getCacheKey('teacher_library'));
+    }
+
     public function add(Request $request)
     {
         if (Auth::user()->role !== 'teacher') {
@@ -40,6 +53,8 @@ class BookController extends Controller
         }
 
         $book = Book::create($bookData);
+        
+        $this->clearBookCache();
 
         return response()->json([
             'status' => 'success',
@@ -49,7 +64,10 @@ class BookController extends Controller
 
     public function getBooks()
     {
-        $books = Book::all();
+        $books = Cache::remember($this->getCacheKey('all'), $this->cacheExpiration, function () {
+            return Book::all();
+        });
+
         return response()->json([
             'status' => 'success',
             'books' => $books
@@ -62,7 +80,10 @@ class BookController extends Controller
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
         }
 
-        $books = Book::all();
+        $books = Cache::remember($this->getCacheKey('teacher_library'), $this->cacheExpiration, function () {
+            return Book::all();
+        });
+
         return response()->json([
             'status' => 'success',
             'books' => $books
@@ -71,7 +92,11 @@ class BookController extends Controller
 
     public function myLibrary()
     {
-        $books = Auth::user()->books;
+        $userId = Auth::id();
+        $books = Cache::remember($this->getCacheKey('user_library', $userId), $this->cacheExpiration, function () {
+            return Auth::user()->books;
+        });
+
         return response()->json([
             'status' => 'success',
             'books' => $books
@@ -89,6 +114,8 @@ class BookController extends Controller
         }
 
         $user->books()->attach($book->id);
+        
+        Cache::forget($this->getCacheKey('user_library', $user->id));
 
         return response()->json([
             'status' => 'success',
@@ -107,6 +134,8 @@ class BookController extends Controller
         }
 
         $user->books()->detach($book->id);
+        
+        Cache::forget($this->getCacheKey('user_library', $user->id));
 
         return response()->json([
             'status' => 'success',
@@ -121,6 +150,8 @@ class BookController extends Controller
         }
 
         $book->delete();
+        
+        $this->clearBookCache();
 
         return response()->json([
             'status' => 'success',
@@ -158,6 +189,9 @@ class BookController extends Controller
 
             $book->update($updateData);
             $book->refresh();
+            
+            // Clear books cache
+            $this->clearBookCache();
 
             return response()->json([
                 'status' => 'success',
@@ -180,12 +214,15 @@ class BookController extends Controller
         ]);
 
         $query = $request->input('query');
-
-        $books = Book::where('title', 'ILIKE', "%{$query}%")
-            ->orWhere('author', 'ILIKE', "%{$query}%")
-            ->orWhere('isbn', 'ILIKE', "%{$query}%")
-            ->orWhere('description', 'ILIKE', "%{$query}%")
-            ->get();
+        
+        $cacheKey = $this->getCacheKey('search', md5($query));
+        $books = Cache::remember($cacheKey, $this->searchCacheExpiration, function () use ($query) {
+            return Book::where('title', 'ILIKE', "%{$query}%")
+                ->orWhere('author', 'ILIKE', "%{$query}%")
+                ->orWhere('isbn', 'ILIKE', "%{$query}%")
+                ->orWhere('description', 'ILIKE', "%{$query}%")
+                ->get();
+        });
 
         return response()->json([
             'status' => 'success',
