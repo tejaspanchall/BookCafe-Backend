@@ -4,7 +4,8 @@ CREATE TABLE users (
     lastname VARCHAR(50) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
-    reset_token VARCHAR(64)
+    reset_token VARCHAR(64),
+    role VARCHAR(20) NOT NULL DEFAULT 'teacher' CHECK (role IN ('teacher', 'student'))
 );
 
 CREATE TABLE books (
@@ -22,11 +23,4 @@ CREATE TABLE user_books (
     user_id INTEGER REFERENCES users(id),
     book_id INTEGER REFERENCES books(id),
     PRIMARY KEY (user_id, book_id)
-);
-
-ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'student';
-
-UPDATE users SET role = 'teacher';
-
-ALTER TABLE users
-ADD CONSTRAINT valid_role CHECK (role IN ('teacher', 'student')); 
+); 

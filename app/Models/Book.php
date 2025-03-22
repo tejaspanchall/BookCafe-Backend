@@ -49,6 +49,13 @@ class Book extends Model
         if (!$value) {
             return null;
         }
+        
+        // If the image is already a full URL, return it as is
+        if (filter_var($value, FILTER_VALIDATE_URL)) {
+            return $value;
+        }
+        
+        // Otherwise, prepend the path for local files
         return 'books/' . $value;
     }
 }

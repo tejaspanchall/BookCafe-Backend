@@ -86,6 +86,9 @@ class BookController extends Controller
 
     public function getBooks()
     {
+        // Clear cache first to ensure we get fresh data
+        Cache::forget($this->getCacheKey('all'));
+        
         $books = Cache::remember($this->getCacheKey('all'), $this->cacheExpiration, function () {
             return Book::all();
         });

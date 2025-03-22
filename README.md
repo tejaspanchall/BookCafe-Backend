@@ -82,6 +82,11 @@ php artisan serve
 
 The API will be available at `http://localhost:8000/api`
 
+## Seed Database with 100 Popular books (*Optional*)
+```bash
+php artisan db:seed --class=BookSeeder
+```
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
