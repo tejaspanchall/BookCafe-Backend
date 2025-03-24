@@ -6,96 +6,80 @@ use App\Models\Book;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
 
 class BookController extends Controller
 {
-    private $cacheExpiration = 3600; // 1 hour
-    private $searchCacheExpiration = 300; // 5 minutes
-
-    private function getCacheKey($type, $identifier = null) {
-        return 'books:' . $type . ($identifier ? ':' . $identifier : '');
-    }
-
-    private function clearBookCache() {
-        Cache::forget($this->getCacheKey('all'));
-        Cache::forget($this->getCacheKey('teacher_library'));
-        
-        // Clear search cache
-        $searchPattern = 'books:search:*';
-        $keys = Cache::get($searchPattern);
-        if ($keys) {
-            foreach ($keys as $key) {
-                Cache::forget($key);
-            }
-        }
-        
-        // Clear user libraries cache
-        $userLibraryPattern = 'books:user_library:*';
-        $keys = Cache::get($userLibraryPattern);
-        if ($keys) {
-            foreach ($keys as $key) {
-                Cache::forget($key);
-            }
-        }
-    }
-
     public function add(Request $request)
     {
         if (Auth::user()->role !== 'teacher') {
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
         }
 
-        $validatedData = $request->validate([
+        $request->validate([
             'title' => 'required|string|max:255',
             'author' => 'required|string|max:100',
-            'isbn' => 'required|string|max:20|unique:books',
+            'isbn' => 'required|string|max:20|unique:books,isbn',
             'description' => 'nullable|string',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
             'category' => 'nullable|string|max:50',
-            'price' => 'nullable|numeric|min:0'
+            'price' => 'nullable|numeric',
+            'image' => 'nullable|image|max:2048'
         ]);
 
-        $bookData = [
-            'title' => $validatedData['title'],
-            'author' => $validatedData['author'],
-            'isbn' => $validatedData['isbn'],
-            'description' => $validatedData['description'] ?? null,
-            'category' => $validatedData['category'] ?? null,
-            'price' => $validatedData['price'] ?? null,
-            'image' => null
-        ];
+        try {
+            $book = new Book();
+            $book->title = $request->title;
+            $book->author = $request->author;
+            $book->isbn = $request->isbn;
+            $book->description = $request->description;
+            $book->category = $request->category;
+            $book->price = $request->price;
 
-        if ($request->hasFile('image')) {
-            $image = $request->file('image');
-            $imageName = time() . '_' . $image->getClientOriginalName();
-            $image->storeAs('books', $imageName, 'public');
-            $bookData['image'] = $imageName;
+            if ($request->hasFile('image')) {
+                $image = $request->file('image');
+                $filename = time() . '_' . $image->getClientOriginalName();
+                // Store in public disk
+                $path = $image->storeAs('books', $filename, 'public');
+                $book->image = $filename;
+            }
+
+            $book->save();
+
+            // Create full URL for the image
+            $imageUrl = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+
+            return response()->json([
+                'status' => 'success',
+                'book' => $book,
+                'image_url' => $imageUrl
+            ], Response::HTTP_CREATED);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to add book',
+                'error' => $e->getMessage()
+            ], Response::HTTP_BAD_REQUEST);
         }
-
-        $book = Book::create($bookData);
-        
-        $this->clearBookCache();
-
-        return response()->json([
-            'status' => 'success',
-            'book' => $book
-        ], Response::HTTP_CREATED);
     }
 
     public function getBooks()
     {
-        // Clear cache first to ensure we get fresh data
-        Cache::forget($this->getCacheKey('all'));
+        $books = Book::all();
         
-        $books = Cache::remember($this->getCacheKey('all'), $this->cacheExpiration, function () {
-            return Book::all();
+        // Add image URLs for each book
+        $booksWithUrls = $books->map(function($book) {
+            // If no image, provide a transparent pixel data URL
+            $book->image_url = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+            return $book;
         });
 
         return response()->json([
             'status' => 'success',
-            'books' => $books
+            'books' => $booksWithUrls
         ]);
     }
 
@@ -105,26 +89,40 @@ class BookController extends Controller
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
         }
 
-        $books = Cache::remember($this->getCacheKey('teacher_library'), $this->cacheExpiration, function () {
-            return Book::all();
+        $books = Book::all();
+        
+        // Add image URLs for each book
+        $booksWithUrls = $books->map(function($book) {
+            // If no image, provide a transparent pixel data URL
+            $book->image_url = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+            return $book;
         });
 
         return response()->json([
             'status' => 'success',
-            'books' => $books
+            'books' => $booksWithUrls
         ]);
     }
 
     public function myLibrary()
     {
         $userId = Auth::id();
-        $books = Cache::remember($this->getCacheKey('user_library', $userId), $this->cacheExpiration, function () {
-            return Auth::user()->books;
+        $books = Auth::user()->books;
+        
+        // Add image URLs for each book
+        $booksWithUrls = $books->map(function($book) {
+            // If no image, provide a transparent pixel data URL
+            $book->image_url = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+            return $book;
         });
 
         return response()->json([
             'status' => 'success',
-            'books' => $books
+            'books' => $booksWithUrls
         ]);
     }
 
@@ -139,8 +137,6 @@ class BookController extends Controller
         }
 
         $user->books()->attach($book->id);
-        
-        Cache::forget($this->getCacheKey('user_library', $user->id));
 
         return response()->json([
             'status' => 'success',
@@ -159,8 +155,6 @@ class BookController extends Controller
         }
 
         $user->books()->detach($book->id);
-        
-        Cache::forget($this->getCacheKey('user_library', $user->id));
 
         return response()->json([
             'status' => 'success',
@@ -175,8 +169,6 @@ class BookController extends Controller
         }
 
         $book->delete();
-        
-        $this->clearBookCache();
 
         return response()->json([
             'status' => 'success',
@@ -190,40 +182,66 @@ class BookController extends Controller
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
         }
 
-        try {
-            $validatedData = $request->validate([
-                'title' => 'sometimes|required|string|max:255',
-                'author' => 'sometimes|required|string|max:100',
-                'isbn' => 'sometimes|required|string|max:20|unique:books,isbn,' . $book->id,
-                'description' => 'sometimes|nullable|string',
-                'image' => 'sometimes|nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
-                'category' => 'sometimes|nullable|string|max:50',
-                'price' => 'sometimes|nullable|numeric|min:0'
-            ]);
+        $validatedData = $request->validate([
+            'title' => 'string|max:255',
+            'author' => 'string|max:100',
+            'isbn' => 'string|max:20|unique:books,isbn,' . $book->id,
+            'description' => 'nullable|string',
+            'category' => 'nullable|string|max:50',
+            'price' => 'nullable|numeric',
+            'image' => 'nullable|image|max:2048'
+        ]);
 
-            $updateData = collect($validatedData)->except('image')->toArray();
+        try {
+            if ($request->filled('title')) {
+                $book->title = $request->title;
+            }
+            
+            if ($request->filled('author')) {
+                $book->author = $request->author;
+            }
+            
+            if ($request->filled('isbn')) {
+                $book->isbn = $request->isbn;
+            }
+            
+            if ($request->filled('description')) {
+                $book->description = $request->description;
+            }
+            
+            if ($request->filled('category')) {
+                $book->category = $request->category;
+            }
+            
+            if ($request->filled('price')) {
+                $book->price = $request->price;
+            }
 
             if ($request->hasFile('image')) {
+                // Delete old image if exists
                 if ($book->image) {
                     Storage::disk('public')->delete('books/' . $book->image);
                 }
                 
                 $image = $request->file('image');
-                $imageName = time() . '_' . $image->getClientOriginalName();
-                $image->storeAs('books', $imageName, 'public');
-                $updateData['image'] = $imageName;
+                $filename = time() . '_' . $image->getClientOriginalName();
+                $path = $image->storeAs('books', $filename, 'public');
+                $book->image = $filename;
             }
 
-            $book->update($updateData);
-            $book->refresh();
-            
-            $this->clearBookCache();
+            $book->save();
+
+            // Create full URL for the image
+            $imageUrl = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Book updated successfully',
-                'book' => $book
-            ], Response::HTTP_OK);
+                'book' => $book,
+                'image_url' => $imageUrl,
+                'message' => 'Book updated successfully'
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
@@ -241,19 +259,25 @@ class BookController extends Controller
 
         $query = $request->input('query');
         
-        $cacheKey = $this->getCacheKey('search', md5($query));
-        $books = Cache::remember($cacheKey, $this->searchCacheExpiration, function () use ($query) {
-            return Book::where('title', 'ILIKE', "%{$query}%")
-                ->orWhere('author', 'ILIKE', "%{$query}%")
-                ->orWhere('isbn', 'ILIKE', "%{$query}%")
-                ->orWhere('description', 'ILIKE', "%{$query}%")
-                ->orWhere('category', 'ILIKE', "%{$query}%")
-                ->get();
+        $books = Book::where('title', 'ILIKE', "%{$query}%")
+            ->orWhere('author', 'ILIKE', "%{$query}%")
+            ->orWhere('isbn', 'ILIKE', "%{$query}%")
+            ->orWhere('description', 'ILIKE', "%{$query}%")
+            ->orWhere('category', 'ILIKE', "%{$query}%")
+            ->get();
+            
+        // Add image URLs for each book
+        $booksWithUrls = $books->map(function($book) {
+            // If no image, provide a transparent pixel data URL
+            $book->image_url = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+            return $book;
         });
 
         return response()->json([
             'status' => 'success',
-            'books' => $books
+            'books' => $booksWithUrls
         ]);
     }
 
@@ -265,7 +289,7 @@ class BookController extends Controller
 
         try {
             if ($book->image) {
-                Storage::delete('public/books/' . $book->image);
+                Storage::disk('public')->delete('books/' . $book->image);
             }
 
             $book->delete();

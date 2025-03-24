@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Storage;
 
 class Book extends Model
 {
@@ -44,18 +45,19 @@ class Book extends Model
      *
      * @return string|null
      */
-    protected function getImageAttribute($value)
+    public function getImageUrlAttribute()
     {
-        if (!$value) {
+        if (!$this->image) {
             return null;
         }
         
         // If the image is already a full URL, return it as is
-        if (filter_var($value, FILTER_VALIDATE_URL)) {
-            return $value;
+        if (filter_var($this->image, FILTER_VALIDATE_URL)) {
+            return $this->image;
         }
         
-        // Otherwise, prepend the path for local files
-        return 'books/' . $value;
+        // Return just the image path relative to the storage folder
+        // The frontend will construct the full URL
+        return $this->image;
     }
 }
