@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Models\User;
 use App\Http\Controllers\Controller;
+use App\Traits\AuthCacheTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -12,35 +13,43 @@ use Symfony\Component\HttpFoundation\Response;
 
 class AuthController extends Controller
 {
-    private function getRolePermissions($role) {
-        $permissions = [
-            'teacher' => [
-                'books' => [
-                    'borrow' => true,
-                    'add' => true,
-                    'edit' => true,
-                    'delete' => true,
-                ],
-                'library' => [
-                    'access' => true,
-                    'manage' => true
-                ]
-            ],
-            'student' => [
-                'books' => [
-                    'borrow' => true,
-                    'add' => false,
-                    'edit' => false,
-                    'delete' => false,
-                ],
-                'library' => [
-                    'access' => true,
-                    'manage' => false
-                ]
-            ]
-        ];
+    use AuthCacheTrait;
 
-        return $permissions[$role] ?? [];
+    const CACHE_DURATION = 3600;
+
+    private function getRolePermissions($role) {
+        $cacheKey = "auth:role:{$role}:permissions";
+        
+        return $this->getCachedAuthData($cacheKey, self::CACHE_DURATION, function() use ($role) {
+            $permissions = [
+                'teacher' => [
+                    'books' => [
+                        'borrow' => true,
+                        'add' => true,
+                        'edit' => true,
+                        'delete' => true,
+                    ],
+                    'library' => [
+                        'access' => true,
+                        'manage' => true
+                    ]
+                ],
+                'student' => [
+                    'books' => [
+                        'borrow' => true,
+                        'add' => false,
+                        'edit' => false,
+                        'delete' => false,
+                    ],
+                    'library' => [
+                        'access' => true,
+                        'manage' => false
+                    ]
+                ]
+            ];
+
+            return $permissions[$role] ?? [];
+        });
     }
 
     public function register(Request $request)
@@ -62,6 +71,14 @@ class AuthController extends Controller
         ]);
 
         $token = $user->createToken('auth_token')->plainTextToken;
+
+        $this->getCachedAuthData(
+            $this->getUserPermissionsCacheKey($user->id),
+            self::CACHE_DURATION,
+            function() use ($user) {
+                return $this->getRolePermissions($user->role);
+            }
+        );
 
         return response()->json([
             'status' => 'success',
@@ -88,6 +105,14 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
+        $permissions = $this->getCachedAuthData(
+            $this->getUserPermissionsCacheKey($user->id),
+            self::CACHE_DURATION,
+            function() use ($user) {
+                return $this->getRolePermissions($user->role);
+            }
+        );
+
         return response()->json([
             'status' => 'success',
             'token' => $token,
@@ -98,7 +123,7 @@ class AuthController extends Controller
                 'lastname' => $user->lastname,
                 'role' => $user->role
             ],
-            'permissions' => $this->getRolePermissions($user->role)
+            'permissions' => $permissions
         ]);
     }
 
@@ -120,6 +145,8 @@ class AuthController extends Controller
             $reset_token = Str::random(64);
             $user->reset_token = $reset_token;
             $user->save();
+
+            $this->invalidateAuthCache("auth:user:{$user->id}:*");
 
             Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $reset_token));
 
@@ -155,6 +182,8 @@ class AuthController extends Controller
         $user->reset_token = null;
         $user->save();
 
+        $this->invalidateAuthCache("auth:user:{$user->id}:*");
+
         return response()->json([
             'status' => 'success',
             'message' => 'Password reset successful'
@@ -165,6 +194,8 @@ class AuthController extends Controller
     {
         $user = $request->user();
         $user->tokens()->delete();
+
+        $this->invalidateAuthCache("auth:user:{$user->id}:*");
 
         return response()->json([
             'status' => 'success'
