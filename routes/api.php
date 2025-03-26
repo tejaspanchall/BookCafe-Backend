@@ -3,10 +3,15 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\BookController;
+use App\Http\Controllers\CategoryController;
 
 Route::prefix('books')->group(function () {
     Route::get('/search', [BookController::class, 'search']);
     Route::get('/get-books', [BookController::class, 'getBooks']);
+});
+
+Route::prefix('categories')->group(function () {
+    Route::get('/', [CategoryController::class, 'index']);
 });
 
 Route::prefix('auth')->group(function () {
@@ -27,7 +32,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/{book}/remove-from-library', [BookController::class, 'removeFromLibrary']);
         Route::get('/get-library', [BookController::class, 'getLibrary']);
         Route::post('/add', [BookController::class, 'add']);
-        Route::put('/{book}', [BookController::class, 'updateBook']);
+        Route::put('/{book}', [BookController::class, 'update']);
         Route::delete('/{book}', [BookController::class, 'deleteBook']);
+    });
+    
+    Route::prefix('categories')->group(function () {
+        Route::post('/', [CategoryController::class, 'store']);
     });
 });

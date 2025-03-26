@@ -28,9 +28,15 @@ class Book extends Model
         'description',
         'isbn',
         'author',
-        'category',
         'price'
     ];
+
+    /**
+     * The accessors to append to the model's array form.
+     *
+     * @var array
+     */
+    protected $appends = ['image_url'];
 
     /**
      * Get the users that have this book in their library.
@@ -38,6 +44,14 @@ class Book extends Model
     public function users()
     {
         return $this->belongsToMany(User::class, 'user_books');
+    }
+
+    /**
+     * Get the categories for this book.
+     */
+    public function categories()
+    {
+        return $this->belongsToMany(Category::class, 'book_categories');
     }
 
     /**
