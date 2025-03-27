@@ -27,7 +27,6 @@ class Book extends Model
         'image',
         'description',
         'isbn',
-        'author',
         'price'
     ];
 
@@ -52,6 +51,14 @@ class Book extends Model
     public function categories()
     {
         return $this->belongsToMany(Category::class, 'book_categories');
+    }
+
+    /**
+     * Get the authors for this book.
+     */
+    public function authors()
+    {
+        return $this->belongsToMany(Author::class, 'book_authors');
     }
 
     /**

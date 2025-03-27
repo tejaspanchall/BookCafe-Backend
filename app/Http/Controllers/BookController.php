@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
 use App\Models\User;
+use App\Models\Author;
 
 class BookController extends Controller
 {
@@ -25,7 +26,8 @@ class BookController extends Controller
 
         $request->validate([
             'title' => 'required|string|max:255',
-            'author' => 'required|string|max:100',
+            'authors' => 'required|array',
+            'authors.*' => 'required|string|max:100',
             'isbn' => 'required|string|max:20|unique:books,isbn',
             'description' => 'nullable|string',
             'categories' => 'nullable|array',
@@ -37,7 +39,6 @@ class BookController extends Controller
         try {
             $book = new Book();
             $book->title = $request->title;
-            $book->author = $request->author;
             $book->isbn = $request->isbn;
             $book->description = $request->description;
             $book->price = $request->price;
@@ -50,6 +51,11 @@ class BookController extends Controller
             }
 
             $book->save();
+
+            // Handle authors
+            if ($request->has('authors') && is_array($request->authors)) {
+                $this->syncAuthors($book, $request->authors);
+            }
 
             // Handle categories
             if ($request->has('categories') && is_array($request->categories)) {
@@ -64,7 +70,7 @@ class BookController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'book' => $book->load('categories'),
+                'book' => $book->load(['categories', 'authors']),
                 'image_url' => $imageUrl
             ], Response::HTTP_CREATED);
         } catch (\Exception $e) {
@@ -79,8 +85,8 @@ class BookController extends Controller
     public function getBooks()
     {
         try {
-            $books = Cache::remember('books:all', self::CACHE_DURATION, function() {
-                return Book::with(['users', 'categories'])->get();
+            $books = $this->getCachedData('books:all', self::CACHE_DURATION, function() {
+                return Book::with(['users', 'categories', 'authors'])->get();
             });
             
             $booksWithUrls = $books->map(function($book) {
@@ -95,7 +101,8 @@ class BookController extends Controller
                 'books' => $booksWithUrls
             ]);
         } catch (\Exception $e) {
-            $books = Book::with(['users', 'categories'])->get();
+            \Log::error('Error fetching books: ' . $e->getMessage());
+            $books = Book::with(['users', 'categories', 'authors'])->get();
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 
                     ? url('storage/books/' . urlencode($book->image))
@@ -119,7 +126,7 @@ class BookController extends Controller
         $cacheKey = 'books:library';
         
         $books = $this->getCachedData($cacheKey, self::CACHE_DURATION, function() {
-            return Book::with('categories')->get();
+            return Book::with(['categories', 'authors'])->get();
         });
         
         $booksWithUrls = $books->map(function($book) {
@@ -139,8 +146,8 @@ class BookController extends Controller
     {
         try {
             $userId = Auth::id();
-            $books = Cache::remember("books:user:{$userId}:library", self::CACHE_DURATION, function() {
-                return Auth::user()->books()->with(['users', 'categories'])->get();
+            $books = $this->getCachedData("books:user:{$userId}:library", self::CACHE_DURATION, function() {
+                return Auth::user()->books()->with(['users', 'categories', 'authors'])->get();
             });
             
             $booksWithUrls = $books->map(function($book) {
@@ -155,7 +162,8 @@ class BookController extends Controller
                 'books' => $booksWithUrls
             ]);
         } catch (\Exception $e) {
-            $books = Auth::user()->books()->with(['users', 'categories'])->get();
+            \Log::error('Error fetching user library: ' . $e->getMessage());
+            $books = Auth::user()->books()->with(['users', 'categories', 'authors'])->get();
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 
                     ? url('storage/books/' . urlencode($book->image))
@@ -307,7 +315,8 @@ class BookController extends Controller
 
         $validatedData = $request->validate([
             'title' => 'string|max:255',
-            'author' => 'string|max:100',
+            'authors' => 'nullable|array',
+            'authors.*' => 'string|max:100',
             'isbn' => 'string|max:20|unique:books,isbn,' . $book->id,
             'description' => 'nullable|string',
             'categories' => 'nullable|array',
@@ -319,10 +328,6 @@ class BookController extends Controller
         try {
             if ($request->filled('title')) {
                 $book->title = $request->title;
-            }
-            
-            if ($request->filled('author')) {
-                $book->author = $request->author;
             }
             
             if ($request->filled('isbn')) {
@@ -350,6 +355,11 @@ class BookController extends Controller
 
             $book->save();
 
+            // Handle authors
+            if ($request->has('authors')) {
+                $this->syncAuthors($book, $request->authors);
+            }
+
             // Handle categories
             if ($request->has('categories')) {
                 $this->syncCategories($book, $request->categories);
@@ -363,7 +373,7 @@ class BookController extends Controller
 
             return response()->json([
                 'status' => 'success',
-                'book' => $book->load('categories'),
+                'book' => $book->load(['categories', 'authors']),
                 'image_url' => $imageUrl,
                 'message' => 'Book updated successfully'
             ]);
@@ -387,14 +397,16 @@ class BookController extends Controller
                 ]);
             }
 
-            $books = Cache::remember("books:search:{$query}", self::CACHE_DURATION, function() use ($query) {
+            $books = $this->getCachedData("books:search:{$query}", self::CACHE_DURATION, function() use ($query) {
                 return Book::where('title', 'like', "%{$query}%")
-                    ->orWhere('author', 'like', "%{$query}%")
+                    ->orWhereHas('authors', function($q) use ($query) {
+                        $q->where('name', 'like', "%{$query}%");
+                    })
                     ->orWhere('isbn', 'like', "%{$query}%")
                     ->orWhereHas('categories', function($q) use ($query) {
                         $q->where('name', 'like', "%{$query}%");
                     })
-                    ->with(['users', 'categories'])
+                    ->with(['users', 'categories', 'authors'])
                     ->get();
             });
             
@@ -410,13 +422,16 @@ class BookController extends Controller
                 'books' => $booksWithUrls
             ]);
         } catch (\Exception $e) {
+            \Log::error('Error searching books: ' . $e->getMessage());
             $books = Book::where('title', 'like', "%{$query}%")
-                ->orWhere('author', 'like', "%{$query}%")
+                ->orWhereHas('authors', function($q) use ($query) {
+                    $q->where('name', 'like', "%{$query}%");
+                })
                 ->orWhere('isbn', 'like', "%{$query}%")
                 ->orWhereHas('categories', function($q) use ($query) {
                     $q->where('name', 'like', "%{$query}%");
                 })
-                ->with(['users', 'categories'])
+                ->with(['users', 'categories', 'authors'])
                 ->get();
             
             $booksWithUrls = $books->map(function($book) {
@@ -455,16 +470,37 @@ class BookController extends Controller
         Cache::forget('categories:all');
     }
 
+    /**
+     * Sync authors for a book
+     */
+    private function syncAuthors(Book $book, array $authorNames)
+    {
+        $authorIds = [];
+        
+        foreach ($authorNames as $name) {
+            if (empty($name)) continue;
+            
+            // Find or create the author
+            $author = Author::firstOrCreate(['name' => $name]);
+            $authorIds[] = $author->id;
+        }
+        
+        // Sync the authors with the book
+        $book->authors()->sync($authorIds);
+    }
+
     protected function refreshBookCaches()
     {
         try {
             $this->clearBookCaches();
 
-            $books = Book::with(['users', 'categories'])->get();
+            $books = Book::with(['users', 'categories', 'authors'])->get();
             Cache::put('books:all', $books, self::CACHE_DURATION);
 
             Cache::put('books:library', $books, self::CACHE_DURATION);
         } catch (\Exception $e) {
+            // Silently fail if Redis is unavailable
+            \Log::error('Error refreshing book caches: ' . $e->getMessage());
         }
     }
 
@@ -473,10 +509,12 @@ class BookController extends Controller
         try {
             $user = User::find($userId);
             if ($user) {
-                $books = $user->books()->with(['users', 'categories'])->get();
+                $books = $user->books()->with(['users', 'categories', 'authors'])->get();
                 Cache::put("books:user:{$userId}:library", $books, self::CACHE_DURATION);
             }
         } catch (\Exception $e) {
+            // Silently fail if Redis is unavailable
+            \Log::error('Error refreshing user library cache: ' . $e->getMessage());
         }
     }
 
@@ -491,6 +529,8 @@ class BookController extends Controller
                 Cache::forget("books:user:{$user->id}:library");
             }
         } catch (\Exception $e) {
+            // Silently fail if Redis is unavailable
+            \Log::error('Error clearing book caches: ' . $e->getMessage());
         }
     }
 } 
