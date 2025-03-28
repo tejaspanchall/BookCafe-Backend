@@ -390,6 +390,8 @@ class BookController extends Controller
     {
         try {
             $query = $request->input('query', '');
+            $type = $request->input('type', 'name'); // Default to name if not provided
+            
             if (empty($query)) {
                 return response()->json([
                     'status' => 'success',
@@ -397,17 +399,28 @@ class BookController extends Controller
                 ]);
             }
 
-            $books = $this->getCachedData("books:search:{$query}", self::CACHE_DURATION, function() use ($query) {
-                return Book::where('title', 'like', "%{$query}%")
-                    ->orWhereHas('authors', function($q) use ($query) {
-                        $q->where('name', 'like', "%{$query}%");
-                    })
-                    ->orWhere('isbn', 'like', "%{$query}%")
-                    ->orWhereHas('categories', function($q) use ($query) {
-                        $q->where('name', 'like', "%{$query}%");
-                    })
-                    ->with(['users', 'categories', 'authors'])
-                    ->get();
+            $cacheKey = "books:search:{$type}:{$query}";
+            
+            $books = $this->getCachedData($cacheKey, self::CACHE_DURATION, function() use ($query, $type) {
+                $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
+                
+                // Apply different search criteria based on type
+                switch($type) {
+                    case 'author':
+                        $bookQuery->whereHas('authors', function($q) use ($query) {
+                            $q->where('name', 'like', "%{$query}%");
+                        });
+                        break;
+                    case 'isbn':
+                        $bookQuery->where('isbn', 'like', "%{$query}%");
+                        break;
+                    case 'name':
+                    default:
+                        $bookQuery->where('title', 'like', "%{$query}%");
+                        break;
+                }
+                
+                return $bookQuery->get();
             });
             
             $booksWithUrls = $books->map(function($book) {
@@ -423,16 +436,26 @@ class BookController extends Controller
             ]);
         } catch (\Exception $e) {
             \Log::error('Error searching books: ' . $e->getMessage());
-            $books = Book::where('title', 'like', "%{$query}%")
-                ->orWhereHas('authors', function($q) use ($query) {
-                    $q->where('name', 'like', "%{$query}%");
-                })
-                ->orWhere('isbn', 'like', "%{$query}%")
-                ->orWhereHas('categories', function($q) use ($query) {
-                    $q->where('name', 'like', "%{$query}%");
-                })
-                ->with(['users', 'categories', 'authors'])
-                ->get();
+            
+            $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
+            
+            // Apply different search criteria based on type
+            switch($type) {
+                case 'author':
+                    $bookQuery->whereHas('authors', function($q) use ($query) {
+                        $q->where('name', 'like', "%{$query}%");
+                    });
+                    break;
+                case 'isbn':
+                    $bookQuery->where('isbn', 'like', "%{$query}%");
+                    break;
+                case 'name':
+                default:
+                    $bookQuery->where('title', 'like', "%{$query}%");
+                    break;
+            }
+            
+            $books = $bookQuery->get();
             
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 

@@ -3,7 +3,11 @@
 namespace Database\Seeders;
 
 use App\Models\Book;
+use App\Models\Author;
+use App\Models\Category;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
@@ -14,289 +18,331 @@ class BookSeeder extends Seeder
      */
     public function run(): void
     {
-        // Clear existing books
+        // Clear existing books and relationships
+        Schema::disableForeignKeyConstraints();
+        DB::table('book_authors')->truncate();
+        DB::table('book_categories')->truncate();
         Book::truncate();
+        Schema::enableForeignKeyConstraints();
         
-        // Top 100 most popular books of all time with predefined high-quality images
+        // Additional authors dictionary to use for multiple authors assignment
+        $coauthors = [
+            'Fiction' => ['Alice Walker', 'Joyce Carol Oates', 'Philip Roth', 'Toni Morrison', 'Salman Rushdie', 'Margaret Atwood'],
+            'Fantasy' => ['Terry Pratchett', 'Brandon Sanderson', 'George R.R. Martin', 'Robin Hobb', 'Neil Gaiman', 'Ursula K. Le Guin'],
+            'Dystopian' => ['Aldous Huxley', 'Margaret Atwood', 'Ray Bradbury', 'Philip K. Dick', 'Octavia Butler', 'Suzanne Collins'],
+            'Romance' => ['Jane Austen', 'Nicholas Sparks', 'Danielle Steel', 'Nora Roberts', 'Julia Quinn', 'Emily Brontë'],
+            'Mystery' => ['Agatha Christie', 'Arthur Conan Doyle', 'Ruth Rendell', 'Dorothy L. Sayers', 'P.D. James', 'Gillian Flynn'],
+            'Young Adult' => ['John Green', 'Suzanne Collins', 'Veronica Roth', 'Sarah J. Maas', 'Cassandra Clare', 'Angie Thomas'],
+            'Tragedy' => ['William Shakespeare', 'Sophocles', 'Arthur Miller', 'Tennessee Williams', 'Eugene O\'Neill', 'Henrik Ibsen'],
+            'Historical Fiction' => ['Hilary Mantel', 'Ken Follett', 'Bernard Cornwell', 'Philippa Gregory', 'Diana Gabaldon', 'Colson Whitehead'],
+            'Novella' => ['Franz Kafka', 'Ernest Hemingway', 'George Orwell', 'John Steinbeck', 'Virginia Woolf', 'Stephen King'],
+            'Post-Apocalyptic' => ['Cormac McCarthy', 'Emily St. John Mandel', 'Justin Cronin', 'Stephen King', 'Hugh Howey', 'Octavia Butler'],
+            'Epic Poetry' => ['Homer', 'Virgil', 'Dante Alighieri', 'John Milton', 'T.S. Eliot', 'Derek Walcott'],
+            'Adventure' => ['Jules Verne', 'Jack London', 'Herman Melville', 'Robert Louis Stevenson', 'Alexandre Dumas', 'Ernest Hemingway'],
+            'Children\'s Literature' => ['Roald Dahl', 'J.K. Rowling', 'Dr. Seuss', 'Maurice Sendak', 'E.B. White', 'Lewis Carroll'],
+            'Gothic Fiction' => ['Mary Shelley', 'Edgar Allan Poe', 'Bram Stoker', 'Shirley Jackson', 'Daphne du Maurier', 'Charlotte Brontë'],
+            'Science Fiction' => ['Isaac Asimov', 'Arthur C. Clarke', 'Frank Herbert', 'Ursula K. Le Guin', 'Philip K. Dick', 'Ted Chiang'],
+            'Magical Realism' => ['Gabriel García Márquez', 'Isabel Allende', 'Salman Rushdie', 'Toni Morrison', 'Haruki Murakami', 'Laura Esquivel'],
+            'Bildungsroman' => ['Charles Dickens', 'J.D. Salinger', 'Charlotte Brontë', 'Mark Twain', 'Stephen Chbosky', 'Khaled Hosseini'],
+            'Philosophical Novel' => ['Fyodor Dostoevsky', 'Albert Camus', 'Jean-Paul Sartre', 'Hermann Hesse', 'Milan Kundera', 'Umberto Eco'],
+            'Political Philosophy' => ['Niccolò Machiavelli', 'Thomas Hobbes', 'Jean-Jacques Rousseau', 'Karl Marx', 'John Rawls', 'Hannah Arendt'],
+            'Modernist Novel' => ['James Joyce', 'Virginia Woolf', 'F. Scott Fitzgerald', 'William Faulkner', 'Ernest Hemingway', 'Franz Kafka'],
+            'Thriller' => ['Gillian Flynn', 'John Grisham', 'Stephen King', 'Dan Brown', 'Stieg Larsson', 'Lee Child'],
+            'Horror' => ['Stephen King', 'H.P. Lovecraft', 'Shirley Jackson', 'Clive Barker', 'Dean Koontz', 'Peter Straub'],
+            'Memoir' => ['Michelle Obama', 'Tara Westover', 'Maya Angelou', 'Frank McCourt', 'Malala Yousafzai', 'Trevor Noah'],
+            'Literary Fiction' => ['Donna Tartt', 'Jeffrey Eugenides', 'Zadie Smith', 'Ian McEwan', 'Chimamanda Ngozi Adichie', 'Haruki Murakami'],
+            'Non-fiction' => ['Yuval Noah Harari', 'Malcolm Gladwell', 'Rebecca Skloot', 'Mary Roach', 'Jon Krakauer', 'Michael Lewis'],
+            'Coming-of-Age' => ['Stephen Chbosky', 'J.D. Salinger', 'Rainbow Rowell', 'John Green', 'S.E. Hinton', 'Judy Blume'],
+            'Satire' => ['Joseph Heller', 'George Orwell', 'Kurt Vonnegut', 'Jonathan Swift', 'Margaret Atwood', 'Chuck Palahniuk'],
+            'Novel' => ['Miguel de Cervantes', 'Leo Tolstoy', 'Jane Austen', 'F. Scott Fitzgerald', 'Virginia Woolf', 'Ernest Hemingway'],
+            'Romantic' => ['Jane Austen', 'Emily Brontë', 'Charlotte Brontë', 'Nicholas Sparks', 'E.L. James', 'Danielle Steel']
+        ];
+        
+        // List of all categories to assign at least 2 to each book
+        $allCategories = [
+            'Fiction', 'Fantasy', 'Dystopian', 'Romance', 'Mystery', 'Young Adult', 
+            'Tragedy', 'Historical Fiction', 'Novella', 'Post-Apocalyptic',
+            'Epic Poetry', 'Adventure', 'Children\'s Literature', 'Gothic Fiction',
+            'Science Fiction', 'Magical Realism', 'Bildungsroman', 'Philosophical Novel',
+            'Political Philosophy', 'Modernist Novel', 'Thriller', 'Horror', 'Memoir',
+            'Literary Fiction', 'Non-fiction', 'Coming-of-Age', 'Satire', 'Novel', 'Romantic',
+            'Classic', 'Contemporary', 'Drama', 'Short Story', 'Biography', 'History',
+            'Self-help', 'Poetry', 'Reference', 'Cookbook', 'Travel'
+        ];
+        
+        // Frequently repeated authors to ensure overlap
+        $frequentAuthors = [
+            'Stephen King', 'J.K. Rowling', 'George Orwell', 'Jane Austen', 'Ernest Hemingway',
+            'Virginia Woolf', 'Neil Gaiman', 'Margaret Atwood', 'Toni Morrison', 'Dan Brown'
+        ];
+        
+        // Top books with predefined high-quality images (modified to have arrays of authors and categories)
         $topBooks = [
             [
                 'title' => 'To Kill a Mockingbird',
-                'author' => 'Harper Lee',
-                'category' => 'Fiction',
+                'authors' => ['Harper Lee', 'Truman Capote'],
+                'categories' => ['Fiction', 'Classic', 'Drama'],
                 'description' => 'A gripping, heart-wrenching, and wholly remarkable tale of coming-of-age in a South poisoned by virulent prejudice.',
                 'image' => 'https://m.media-amazon.com/images/I/71FxgtFKcQL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 299
             ],
             [
                 'title' => '1984',
-                'author' => 'George Orwell',
-                'category' => 'Dystopian',
+                'authors' => ['George Orwell', 'Edmund Wilson'],
+                'categories' => ['Dystopian', 'Science Fiction', 'Political Philosophy'],
                 'description' => 'Among the seminal texts of the 20th century, Nineteen Eighty-Four is a rare work that grows more haunting as its futuristic purgatory becomes more real.',
                 'image' => 'https://m.media-amazon.com/images/I/71kxa1-0mfL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 279
             ],
             [
                 'title' => 'The Great Gatsby',
-                'author' => 'F. Scott Fitzgerald',
-                'category' => 'Fiction',
+                'authors' => ['F. Scott Fitzgerald', 'Maxwell Perkins'],
+                'categories' => ['Fiction', 'Classic', 'Drama'],
                 'description' => 'The story of the fabulously wealthy Jay Gatsby and his love for the beautiful Daisy Buchanan.',
                 'image' => 'https://m.media-amazon.com/images/I/71FTb9X6wsL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 249
             ],
             [
                 'title' => 'Harry Potter and the Sorcerer\'s Stone',
-                'author' => 'J.K. Rowling',
-                'category' => 'Fantasy',
+                'authors' => ['J.K. Rowling', 'Mary GrandPré'],
+                'categories' => ['Fantasy', 'Young Adult', 'Adventure'],
                 'description' => 'Harry Potter has never been the star of a Quidditch team, scoring points while riding a broom far above the ground.',
                 'image' => 'https://m.media-amazon.com/images/I/81iqZ2HHD-L._AC_UF1000,1000_QL80_.jpg',
                 'price' => 319
             ],
             [
                 'title' => 'The Lord of the Rings',
-                'author' => 'J.R.R. Tolkien',
-                'category' => 'Fantasy',
+                'authors' => ['J.R.R. Tolkien', 'Christopher Tolkien'],
+                'categories' => ['Fantasy', 'Adventure', 'Epic Poetry'],
                 'description' => 'One Ring to rule them all, One Ring to find them, One Ring to bring them all and in the darkness bind them.',
                 'image' => 'https://m.media-amazon.com/images/I/71jLBXtWJWL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 349
             ],
             [
                 'title' => 'Pride and Prejudice',
-                'author' => 'Jane Austen',
-                'category' => 'Romance',
+                'authors' => ['Jane Austen', 'Vivien Jones'],
+                'categories' => ['Romance', 'Classic', 'Fiction'],
                 'description' => 'The story follows the main character, Elizabeth Bennet, as she deals with issues of manners, upbringing, morality, education, and marriage.',
                 'image' => 'https://m.media-amazon.com/images/I/71Q1tPupKjL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 239
             ],
             [
                 'title' => 'The Hobbit',
-                'author' => 'J.R.R. Tolkien',
-                'category' => 'Fantasy',
+                'authors' => ['J.R.R. Tolkien', 'Alan Lee'],
+                'categories' => ['Fantasy', 'Adventure', 'Fiction'],
                 'description' => 'Bilbo Baggins is a hobbit who enjoys a comfortable, unambitious life, rarely traveling any farther than his pantry or cellar.',
                 'image' => 'https://m.media-amazon.com/images/I/710+HcoP38L._AC_UF1000,1000_QL80_.jpg',
                 'price' => 279
             ],
             [
                 'title' => 'The Catcher in the Rye',
-                'author' => 'J.D. Salinger',
-                'category' => 'Fiction',
+                'authors' => ['J.D. Salinger', 'E. Michael Mitchell'],
+                'categories' => ['Fiction', 'Coming-of-Age', 'Classic'],
                 'description' => 'The hero-narrator of The Catcher in the Rye is an ancient child of sixteen, a native New Yorker named Holden Caulfield.',
                 'image' => 'https://m.media-amazon.com/images/I/8125BDk3l9L.jpg',
                 'price' => 259
             ],
             [
                 'title' => 'Animal Farm',
-                'author' => 'George Orwell',
-                'category' => 'Fiction',
+                'authors' => ['George Orwell', 'Russell Baker'],
+                'categories' => ['Fiction', 'Satire', 'Political Philosophy'],
                 'description' => 'A farm is taken over by its overworked, mistreated animals. With flaming idealism and stirring slogans, they set out to create a paradise of progress, justice, and equality.',
                 'image' => 'https://m.media-amazon.com/images/I/91LUbAcpACL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 249
             ],
             [
                 'title' => 'The Da Vinci Code',
-                'author' => 'Dan Brown',
-                'category' => 'Mystery',
+                'authors' => ['Dan Brown', 'Ron Howard'],
+                'categories' => ['Mystery', 'Thriller', 'Adventure'],
                 'description' => 'While in Paris, Harvard symbologist Robert Langdon is awakened by a phone call in the dead of the night.',
                 'image' => 'https://m.media-amazon.com/images/I/91Q5dCjc2KL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 289
             ],
             [
                 'title' => 'The Alchemist',
-                'author' => 'Paulo Coelho',
-                'category' => 'Fiction',
+                'authors' => ['Paulo Coelho', 'Alan R. Clarke'],
+                'categories' => ['Fiction', 'Philosophical Novel'],
                 'description' => 'The Alchemist follows the journey of an Andalusian shepherd boy named Santiago.',
                 'image' => 'https://m.media-amazon.com/images/I/81FPzmB5fgL.jpg',
                 'price' => 259
             ],
             [
                 'title' => 'Harry Potter and the Chamber of Secrets',
-                'author' => 'J.K. Rowling',
-                'category' => 'Fantasy',
+                'authors' => ['J.K. Rowling', 'Mary GrandPré'],
+                'categories' => ['Fantasy', 'Young Adult'],
                 'description' => 'The second installment of the Harry Potter series finds young wizard Harry Potter and his friends facing new challenges.',
                 'image' => 'https://m.media-amazon.com/images/I/91OINeHnJGL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 319
             ],
             [
                 'title' => 'The Hunger Games',
-                'author' => 'Suzanne Collins',
-                'category' => 'Young Adult',
+                'authors' => ['Suzanne Collins', 'Tim O\'Brien'],
+                'categories' => ['Young Adult', 'Dystopian'],
                 'description' => 'In the ruins of a place once known as North America lies the nation of Panem, a shining Capitol surrounded by twelve outlying districts.',
                 'image' => 'https://m.media-amazon.com/images/I/71WSzS6zvCL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 299
             ],
             [
                 'title' => 'Romeo and Juliet',
-                'author' => 'William Shakespeare',
-                'category' => 'Tragedy',
+                'authors' => ['William Shakespeare', 'Barbara A. Mowat'],
+                'categories' => ['Tragedy', 'Classic'],
                 'description' => 'A tragedy written early in the career of William Shakespeare about two young star-crossed lovers whose deaths ultimately reconcile their feuding families.',
                 'image' => 'https://m.media-amazon.com/images/I/61LQf6GWT4L.jpg',
                 'price' => 229
             ],
             [
                 'title' => 'The Chronicles of Narnia',
-                'author' => 'C.S. Lewis',
-                'category' => 'Fantasy',
+                'authors' => ['C.S. Lewis', 'Pauline Baynes'],
+                'categories' => ['Fantasy', 'Children\'s Literature'],
                 'description' => 'C. S. Lewis\'s The Chronicles of Narnia has captivated readers of all ages for over sixty years.',
                 'image' => 'https://m.media-amazon.com/images/I/81IsNyKSOmL.jpg',
                 'price' => 349
             ],
             [
                 'title' => 'Gone with the Wind',
-                'author' => 'Margaret Mitchell',
-                'category' => 'Historical Fiction',
+                'authors' => ['Margaret Mitchell', 'Pat Conroy'],
+                'categories' => ['Historical Fiction', 'Classic'],
                 'description' => 'Set against the dramatic backdrop of the American Civil War, Margaret Mitchell\'s epic novel of love and war won the Pulitzer Prize.',
                 'image' => 'https://upload.wikimedia.org/wikipedia/commons/4/4a/Gone_with_the_Wind_%281936%2C_first_edition_cover%29.jpg',
                 'price' => 339
             ],
             [
                 'title' => 'The Fault in Our Stars',
-                'author' => 'John Green',
-                'category' => 'Young Adult',
+                'authors' => ['John Green', 'Temple Grandin'],
+                'categories' => ['Young Adult', 'Historical Fiction'],
                 'description' => 'Despite the tumor-shrinking medical miracle that has bought her a few years, Hazel has never been anything but terminal.',
                 'image' => 'https://m.media-amazon.com/images/I/817tHNcyAgL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 269
             ],
             [
                 'title' => 'The Kite Runner',
-                'author' => 'Khaled Hosseini',
-                'category' => 'Fiction',
+                'authors' => ['Khaled Hosseini', 'David Benioff'],
+                'categories' => ['Fiction', 'Historical Fiction'],
                 'description' => 'The unforgettable, heartbreaking story of the unlikely friendship between a wealthy boy and the son of his father\'s servant.',
                 'image' => 'https://m.media-amazon.com/images/I/81IzbD2IiIL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 289
             ],
             [
                 'title' => 'Harry Potter and the Prisoner of Azkaban',
-                'author' => 'J.K. Rowling',
-                'category' => 'Fantasy',
+                'authors' => ['J.K. Rowling', 'Mary GrandPré'],
+                'categories' => ['Fantasy', 'Historical Fiction'],
                 'description' => 'For twelve long years, the dread fortress of Azkaban held an infamous prisoner named Sirius Black.',
                 'image' => 'https://m.media-amazon.com/images/I/81lAPl9Fl0L._AC_UF1000,1000_QL80_.jpg',
                 'price' => 319
             ],
             [
                 'title' => 'The Giver',
-                'author' => 'Lois Lowry',
-                'category' => 'Dystopian',
+                'authors' => ['Lois Lowry', 'Suzanne Collins'],
+                'categories' => ['Dystopian', 'Young Adult'],
                 'description' => 'The Giver, the 1994 Newbery Medal winner, has become one of the most influential novels of our time.',
                 'image' => 'https://images-na.ssl-images-amazon.com/images/S/compressed.photo.goodreads.com/books/1342493368i/3636.jpg',
                 'price' => 249
             ],
             [
                 'title' => 'Alice\'s Adventures in Wonderland',
-                'author' => 'Lewis Carroll',
-                'category' => 'Fantasy',
+                'authors' => ['Lewis Carroll', 'John Tenniel'],
+                'categories' => ['Fantasy', 'Children\'s Literature'],
                 'description' => 'A renowned Fantasy masterpiece by Lewis Carroll, \'Alice\'s Adventures in Wonderland\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/71Uj9TYDQXL._UF1000,1000_QL80_.jpg',
                 'price' => 265
             ],
-            
             [
                 'title' => 'The Grapes of Wrath',
-                'author' => 'John Steinbeck',
-                'category' => 'Fiction',
+                'authors' => ['John Steinbeck', 'Robert DeMott'],
+                'categories' => ['Fiction', 'Classic'],
                 'description' => 'A renowned Fiction masterpiece by John Steinbeck, \'The Grapes of Wrath\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://upload.wikimedia.org/wikipedia/commons/a/ad/The_Grapes_of_Wrath_%281939_1st_ed_cover%29.jpg',
                 'price' => 264
             ],
-            
             [
                 'title' => 'The Divine Comedy',
-                'author' => 'Dante Alighieri',
-                'category' => 'Epic Poetry',
+                'authors' => ['Dante Alighieri', 'Henry Wadsworth Longfellow'],
+                'categories' => ['Epic Poetry', 'Classic'],
                 'description' => 'A renowned Epic Poetry masterpiece by Dante Alighieri, \'The Divine Comedy\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/51i-9SGWr-L._AC_UF1000,1000_QL80_.jpg',
                 'price' => 289
             ],
-            
             [
                 'title' => 'The Call of the Wild',
-                'author' => 'Jack London',
-                'category' => 'Adventure',
+                'authors' => ['Jack London', 'E.L. Doctorow'],
+                'categories' => ['Adventure', 'Classic'],
                 'description' => 'A renowned Adventure masterpiece by Jack London, \'The Call of the Wild\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/91IGZKkFKEL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 259
             ],
-            
             [
                 'title' => 'The Wind in the Willows',
-                'author' => 'Kenneth Grahame',
-                'category' => 'Children\'s Literature',
+                'authors' => ['Kenneth Grahame', 'E.H. Shepard'],
+                'categories' => ['Children\'s Literature', 'Classic'],
                 'description' => 'A renowned Children\'s Literature masterpiece by Kenneth Grahame, \'The Wind in the Willows\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/716xrzpGQkL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 249
             ],
-            
             [
                 'title' => 'Heart of Darkness',
-                'author' => 'Joseph Conrad',
-                'category' => 'Novella',
+                'authors' => ['Joseph Conrad', 'Robert Hampson'],
+                'categories' => ['Novella', 'Classic'],
                 'description' => 'A renowned Novella masterpiece by Joseph Conrad, \'Heart of Darkness\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/71MFRCo1OpL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 239
             ],
-            
             [
                 'title' => 'The Road',
-                'author' => 'Cormac McCarthy',
-                'category' => 'Post-Apocalyptic',
+                'authors' => ['Cormac McCarthy', 'John Hillcoat'],
+                'categories' => ['Post-Apocalyptic', 'Classic'],
                 'description' => 'A renowned Post-Apocalyptic masterpiece by Cormac McCarthy, \'The Road\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/81ChFcmhXDL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 279
             ],
-            
             [
                 'title' => 'The Nightingale',
-                'author' => 'Kristin Hannah',
-                'category' => 'Historical Fiction',
+                'authors' => ['Kristin Hannah', 'Maggie O\'Farrell'],
+                'categories' => ['Historical Fiction', 'Classic'],
                 'description' => 'A renowned Historical Fiction masterpiece by Kristin Hannah, \'The Nightingale\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/914dNZ+lLjL._AC_UF1000,1000_QL80_.jpg',
                 'price' => 299
             ],
-            
             [
                 'title' => 'The Testaments',
-                'author' => 'Margaret Atwood',
-                'category' => 'Dystopian',
+                'authors' => ['Margaret Atwood', 'Ann Dowd'],
+                'categories' => ['Dystopian', 'Classic'],
                 'description' => 'A renowned Dystopian masterpiece by Margaret Atwood, \'The Testaments\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://mms.businesswire.com/media/20190905005170/en/741761/5/Testaments.1.jpg',
                 'price' => 319
             ],
-            
             [
                 'title' => 'A Thousand Splendid Suns',
-                'author' => 'Khaled Hosseini',
-                'category' => 'Historical Fiction',
+                'authors' => ['Khaled Hosseini', 'Atossa Leoni'],
+                'categories' => ['Historical Fiction', 'Classic'],
                 'description' => 'A renowned Historical Fiction masterpiece by Khaled Hosseini, \'A Thousand Splendid Suns\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/81xIPfJ6iUL.jpg',
                 'price' => 289
             ],
-            
             [
                 'title' => 'A Man Called Ove',
-                'author' => 'Fredrik Backman',
-                'category' => 'Fiction',
+                'authors' => ['Fredrik Backman', 'Henning Koch'],
+                'categories' => ['Fiction', 'Classic'],
                 'description' => 'A renowned Fiction masterpiece by Fredrik Backman, \'A Man Called Ove\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/81g2oEdeGTL.jpg',
                 'price' => 269
             ],
-            
             [
                 'title' => 'Big Little Lies',
-                'author' => 'Liane Moriarty',
-                'category' => 'Mystery',
+                'authors' => ['Liane Moriarty', 'Nicole Kidman'],
+                'categories' => ['Mystery', 'Classic'],
                 'description' => 'A renowned Mystery masterpiece by Liane Moriarty, \'Big Little Lies\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://images-na.ssl-images-amazon.com/images/S/compressed.photo.goodreads.com/books/1594851437i/19486412.jpg',
                 'price' => 279
             ],
-            
             [
                 'title' => 'Everything I Never Told You',
-                'author' => 'Celeste Ng',
-                'category' => 'Literary Fiction',
+                'authors' => ['Celeste Ng', 'Cassandra Campbell'],
+                'categories' => ['Literary Fiction', 'Classic'],
                 'description' => 'A renowned Literary Fiction masterpiece by Celeste Ng, \'Everything I Never Told You\' has captivated readers for generations with its engaging narrative and profound themes.',
                 'image' => 'https://m.media-amazon.com/images/I/816SaHQ8k9L.jpg',
                 'price' => 269
             ]
         ];
-        
         
         $additionalPopularBooks = [
             'Brave New World' => ['Aldous Huxley', 'Science Fiction'],
@@ -368,13 +414,68 @@ class BookSeeder extends Seeder
             'Station Eleven' => ['Emily St. John Mandel', 'Science Fiction']
         ];
         
+        // Convert additionalPopularBooks to have multiple authors and categories
+        $additionalPopularBooksWithMultipleAuthors = [];
+        foreach ($additionalPopularBooks as $title => $details) {
+            $mainAuthor = $details[0];
+            $mainCategory = $details[1];
+            
+            // Get potential coauthors based on category
+            $potentialCoauthors = $coauthors[$mainCategory] ?? $coauthors['Fiction'];
+            
+            // Select 1-2 random coauthors different from the main author
+            $selectedCoauthors = [];
+            $filteredCoauthors = array_filter($potentialCoauthors, function($author) use ($mainAuthor) {
+                return $author !== $mainAuthor;
+            });
+            
+            if (count($filteredCoauthors) > 0) {
+                $coauthorCount = rand(1, 2);
+                $shuffledCoauthors = $filteredCoauthors;
+                shuffle($shuffledCoauthors);
+                $selectedCoauthors = array_slice($shuffledCoauthors, 0, $coauthorCount);
+            }
+            
+            // Add a frequent author (25% chance)
+            if (rand(1, 4) === 1) {
+                $frequentAuthor = $frequentAuthors[array_rand($frequentAuthors)];
+                if (!in_array($frequentAuthor, array_merge([$mainAuthor], $selectedCoauthors))) {
+                    $selectedCoauthors[] = $frequentAuthor;
+                }
+            }
+            
+            // Combine main author with coauthors
+            $allAuthors = array_merge([$mainAuthor], $selectedCoauthors);
+            
+            // Select additional categories (at least 1 more)
+            $additionalCategories = [];
+            $remainingCategories = array_diff($allCategories, [$mainCategory]);
+            $numAdditional = rand(1, 3);
+            $randomKeys = array_rand($remainingCategories, min($numAdditional, count($remainingCategories)));
+            
+            if (is_array($randomKeys)) {
+                foreach ($randomKeys as $key) {
+                    $additionalCategories[] = $remainingCategories[$key];
+                }
+            } else if (!empty($randomKeys)) {
+                $additionalCategories[] = $remainingCategories[$randomKeys];
+            }
+            
+            $allBookCategories = array_merge([$mainCategory], $additionalCategories);
+            
+            $additionalPopularBooksWithMultipleAuthors[$title] = [
+                'authors' => $allAuthors,
+                'categories' => $allBookCategories
+            ];
+        }
+        
         $books = $topBooks;
         $usedIsbns = [];
         $usedTitles = array_column($topBooks, 'title');
         $index = count($books) + 1;
         
         // Add additional books to reach 100 total
-        foreach ($additionalPopularBooks as $title => $details) {
+        foreach ($additionalPopularBooksWithMultipleAuthors as $title => $details) {
             // Skip if we already have 100 books
             if (count($books) >= 100) break;
             
@@ -383,14 +484,14 @@ class BookSeeder extends Seeder
                 continue;
             }
             
-            $author = $details[0];
-            $category = $details[1];
+            $authors = $details['authors'];
+            $categories = $details['categories'];
             
             // Generate a unique ISBN
-            $isbn = $this->generateUniqueIsbn($usedIsbns);
+            $isbn = $this->generateUniqueIsbn();
             
             // Create a default description
-            $description = "A renowned {$category} masterpiece by {$author}, '{$title}' has captivated readers for generations with its engaging narrative and profound themes.";
+            $description = "A renowned " . $categories[0] . " masterpiece by " . $authors[0] . ", '{$title}' has captivated readers for generations with its engaging narrative and profound themes.";
             
             // Generate a random price between 199 and 399 ($1.99 to $3.99)
             $price = rand(199, 399);
@@ -400,8 +501,8 @@ class BookSeeder extends Seeder
             
             $books[] = [
                 'title' => $title,
-                'author' => $author,
-                'category' => $category,
+                'authors' => $authors,
+                'categories' => $categories,
                 'description' => $description,
                 'image' => $imageUrl,
                 'price' => $price,
@@ -413,38 +514,58 @@ class BookSeeder extends Seeder
             $index++;
         }
         
-        // Create books in the database
-        foreach ($books as $book) {
+        echo "Starting to seed books...\n";
+        $count = 0;
+
+        foreach ($books as $bookData) {
             try {
-                Book::create([
-                    'title' => $book['title'],
-                    'author' => $book['author'],
-                    'category' => $book['category'],
-                    'description' => $book['description'],
-                    'image' => $book['image'],
-                    'price' => $book['price'],
-                    'isbn' => $this->generateUniqueIsbn($usedIsbns)
+                // Create book without author and category fields
+                $book = Book::create([
+                    'title' => $bookData['title'],
+                    'description' => $bookData['description'],
+                    'image' => $bookData['image'],
+                    'price' => $bookData['price'],
+                    'isbn' => $this->generateUniqueIsbn(),
                 ]);
+                
+                // Create or find categories and associate them with the book
+                foreach ($bookData['categories'] as $categoryName) {
+                    $category = Category::firstOrCreate(['name' => $categoryName]);
+                    
+                    // Associate category with book
+                    DB::table('book_categories')->insert([
+                        'book_id' => $book->id,
+                        'category_id' => $category->id,
+                    ]);
+                }
+                
+                // Create or find authors and associate them with the book
+                foreach ($bookData['authors'] as $authorName) {
+                    $author = Author::firstOrCreate(['name' => $authorName]);
+                    
+                    // Associate author with book
+                    DB::table('book_authors')->insert([
+                        'book_id' => $book->id,
+                        'author_id' => $author->id,
+                    ]);
+                }
+                
+                $count++;
+                echo "Created book: {$book->title}\n";
             } catch (\Exception $e) {
-                echo "Error creating book '{$book['title']}': " . $e->getMessage() . "\n";
+                echo "Error creating book '{$bookData['title']}': {$e->getMessage()}\n";
             }
         }
-        
-        // Check how many books we've created
-        $createdCount = Book::count();
-        echo "Created {$createdCount} books in the database.\n";
+
+        echo "Created $count books in the database.\n";
     }
     
     /**
      * Generate a unique ISBN
      */
-    private function generateUniqueIsbn(&$usedIsbns)
+    private function generateUniqueIsbn()
     {
-        $isbn = '978' . Str::random(10);
-        while (in_array($isbn, $usedIsbns)) {
-            $isbn = '978' . Str::random(10);
-        }
-        return $isbn;
+        return '978' . Str::random(10);
     }
     
     /**
