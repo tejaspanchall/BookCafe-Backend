@@ -85,7 +85,7 @@ class BookController extends Controller
     public function getBooks()
     {
         try {
-            $books = $this->getCachedData('books:all', self::CACHE_DURATION, function() {
+            $books = $this->getCachedBookData('books:all', self::CACHE_DURATION, function() {
                 return Book::with(['users', 'categories', 'authors'])->get();
             });
             
@@ -125,7 +125,7 @@ class BookController extends Controller
 
         $cacheKey = 'books:library';
         
-        $books = $this->getCachedData($cacheKey, self::CACHE_DURATION, function() {
+        $books = $this->getCachedBookData($cacheKey, self::CACHE_DURATION, function() {
             return Book::with(['categories', 'authors'])->get();
         });
         
@@ -146,7 +146,7 @@ class BookController extends Controller
     {
         try {
             $userId = Auth::id();
-            $books = $this->getCachedData("books:user:{$userId}:library", self::CACHE_DURATION, function() {
+            $books = $this->getCachedBookData("books:user:{$userId}:library", self::CACHE_DURATION, function() {
                 return Auth::user()->books()->with(['users', 'categories', 'authors'])->get();
             });
             
@@ -401,7 +401,7 @@ class BookController extends Controller
 
             $cacheKey = "books:search:{$type}:{$query}";
             
-            $books = $this->getCachedData($cacheKey, self::CACHE_DURATION, function() use ($query, $type) {
+            $books = $this->getCachedBookData($cacheKey, self::CACHE_DURATION, function() use ($query, $type) {
                 $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
                 
                 // Apply different search criteria based on type
@@ -492,6 +492,33 @@ class BookController extends Controller
     }
 
     /**
+     * Get a single book by ID
+     */
+    public function getBook($id)
+    {
+        try {
+            $book = $this->getCachedBookData("book:{$id}", self::CACHE_DURATION, function() use ($id) {
+                return Book::with(['categories', 'authors'])->findOrFail($id);
+            });
+            
+            $book->image_url = $book->image 
+                ? url('storage/books/' . urlencode($book->image))
+                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+                
+            return response()->json([
+                'status' => 'success',
+                'book' => $book
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Book not found',
+                'error' => $e->getMessage()
+            ], Response::HTTP_NOT_FOUND);
+        }
+    }
+
+    /**
      * Sync categories for a book
      */
     private function syncCategories(Book $book, array $categoryNames)
@@ -539,8 +566,16 @@ class BookController extends Controller
 
             $books = Book::with(['users', 'categories', 'authors'])->get();
             Cache::put('books:all', $books, self::CACHE_DURATION);
-
             Cache::put('books:library', $books, self::CACHE_DURATION);
+            
+            // Cache popular books
+            $popularBooks = Book::withCount('users')
+                ->with(['categories', 'authors'])
+                ->orderBy('users_count', 'desc')
+                ->take(10)
+                ->get();
+            Cache::put('books:popular', $popularBooks, self::CACHE_DURATION);
+            
         } catch (\Exception $e) {
             // Silently fail if Redis is unavailable
             \Log::error('Error refreshing book caches: ' . $e->getMessage());
@@ -566,7 +601,21 @@ class BookController extends Controller
         try {
             Cache::forget('books:all');
             Cache::forget('books:library');
-
+            Cache::forget('books:popular');
+            
+            // Also clear search caches
+            $this->invalidateBookCache('books:search:*');
+            
+            // Clear individual book caches
+            $this->invalidateBookCache('book:*');
+            
+            // Clear category-related book caches
+            $this->invalidateBookCache('category:*:books');
+            
+            // Clear author-related book caches
+            $this->invalidateBookCache('author:*:books');
+            
+            // Clear user library caches
             $users = User::all();
             foreach ($users as $user) {
                 Cache::forget("books:user:{$user->id}:library");
@@ -574,6 +623,53 @@ class BookController extends Controller
         } catch (\Exception $e) {
             // Silently fail if Redis is unavailable
             \Log::error('Error clearing book caches: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get popular books based on the number of users who have the book in their library
+     */
+    public function getPopularBooks()
+    {
+        try {
+            $books = $this->getCachedBookData('books:popular', self::CACHE_DURATION, function() {
+                return Book::withCount('users')
+                    ->with(['categories', 'authors'])
+                    ->orderBy('users_count', 'desc')
+                    ->take(10)
+                    ->get();
+            });
+            
+            $booksWithUrls = $books->map(function($book) {
+                $book->image_url = $book->image 
+                    ? url('storage/books/' . urlencode($book->image))
+                    : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+                return $book;
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'books' => $booksWithUrls
+            ]);
+        } catch (\Exception $e) {
+            \Log::error('Error fetching popular books: ' . $e->getMessage());
+            $books = Book::withCount('users')
+                ->with(['categories', 'authors'])
+                ->orderBy('users_count', 'desc')
+                ->take(10)
+                ->get();
+                
+            $booksWithUrls = $books->map(function($book) {
+                $book->image_url = $book->image 
+                    ? url('storage/books/' . urlencode($book->image))
+                    : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
+                return $book;
+            });
+
+            return response()->json([
+                'status' => 'success',
+                'books' => $booksWithUrls
+            ]);
         }
     }
 } 

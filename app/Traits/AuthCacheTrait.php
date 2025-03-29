@@ -7,16 +7,17 @@ use Illuminate\Support\Facades\Redis;
 
 trait AuthCacheTrait
 {
-    protected function getCachedAuthData($key, $ttl, $callback)
+    /**
+     * Get auth data directly without caching
+     */
+    protected function getAuthData($callback)
     {
-        try {
-            return Cache::remember($key, $ttl, $callback);
-        } catch (\Exception $e) {
-            // If Redis fails, fallback to callback directly
-            return $callback();
-        }
+        return $callback();
     }
 
+    /**
+     * Invalidate auth cache by pattern
+     */
     protected function invalidateAuthCache($pattern)
     {
         try {
@@ -29,11 +30,19 @@ trait AuthCacheTrait
         }
     }
 
+    /**
+     * Get cache key for user permissions - for reference only
+     * Permissions are not actually cached
+     */
     protected function getUserPermissionsCacheKey($userId)
     {
         return "auth:user:{$userId}:permissions";
     }
 
+    /**
+     * Get cache key for user roles - for reference only
+     * Roles are not actually cached
+     */
     protected function getUserRolesCacheKey($userId)
     {
         return "auth:user:{$userId}:roles";

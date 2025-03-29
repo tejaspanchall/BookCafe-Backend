@@ -18,9 +18,7 @@ class AuthController extends Controller
     const CACHE_DURATION = 3600;
 
     private function getRolePermissions($role) {
-        $cacheKey = "auth:role:{$role}:permissions";
-        
-        return $this->getCachedAuthData($cacheKey, self::CACHE_DURATION, function() use ($role) {
+        return $this->getAuthData(function() use ($role) {
             $permissions = [
                 'teacher' => [
                     'books' => [
@@ -72,19 +70,15 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        $this->getCachedAuthData(
-            $this->getUserPermissionsCacheKey($user->id),
-            self::CACHE_DURATION,
-            function() use ($user) {
-                return $this->getRolePermissions($user->role);
-            }
-        );
+        $permissions = $this->getAuthData(function() use ($user) {
+            return $this->getRolePermissions($user->role);
+        });
 
         return response()->json([
             'status' => 'success',
             'user' => $user,
             'token' => $token,
-            'permissions' => $this->getRolePermissions($user->role)
+            'permissions' => $permissions
         ], Response::HTTP_CREATED);
     }
 
@@ -105,13 +99,9 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
-        $permissions = $this->getCachedAuthData(
-            $this->getUserPermissionsCacheKey($user->id),
-            self::CACHE_DURATION,
-            function() use ($user) {
-                return $this->getRolePermissions($user->role);
-            }
-        );
+        $permissions = $this->getAuthData(function() use ($user) {
+            return $this->getRolePermissions($user->role);
+        });
 
         return response()->json([
             'status' => 'success',

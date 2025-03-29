@@ -7,7 +7,10 @@ use Illuminate\Support\Facades\Redis;
 
 trait RedisCacheTrait
 {
-    protected function getCachedData($key, $ttl, $callback)
+    /**
+     * Get cached book-related data or retrieve it using the callback
+     */
+    protected function getCachedBookData($key, $ttl, $callback)
     {
         try {
             return Cache::remember($key, $ttl, $callback);
@@ -17,7 +20,10 @@ trait RedisCacheTrait
         }
     }
 
-    protected function invalidateCache($pattern)
+    /**
+     * Invalidate book-related cache by pattern
+     */
+    protected function invalidateBookCache($pattern)
     {
         try {
             $keys = Redis::keys($pattern);

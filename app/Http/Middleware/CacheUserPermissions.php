@@ -19,25 +19,17 @@ class CacheUserPermissions
         if (Auth::check()) {
             $user = Auth::user();
             
-            // Cache user roles
-            $roles = $this->getCachedAuthData(
-                $this->getUserRolesCacheKey($user->id),
-                self::CACHE_DURATION,
-                function() use ($user) {
-                    return $user->roles->pluck('name');
-                }
-            );
+            // Get user roles (without caching)
+            $roles = $this->getAuthData(function() use ($user) {
+                return $user->roles->pluck('name');
+            });
 
-            // Cache user permissions
-            $permissions = $this->getCachedAuthData(
-                $this->getUserPermissionsCacheKey($user->id),
-                self::CACHE_DURATION,
-                function() use ($user) {
-                    return $user->getAllPermissions()->pluck('name');
-                }
-            );
+            // Get user permissions (without caching)
+            $permissions = $this->getAuthData(function() use ($user) {
+                return $user->getAllPermissions()->pluck('name');
+            });
 
-            // Add cached data to user object
+            // Add data to user object
             $user->cached_roles = $roles;
             $user->cached_permissions = $permissions;
         }

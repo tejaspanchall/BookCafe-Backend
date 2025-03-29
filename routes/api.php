@@ -4,14 +4,25 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\AuthorController;
 
 Route::prefix('books')->group(function () {
     Route::get('/search', [BookController::class, 'search']);
     Route::get('/get-books', [BookController::class, 'getBooks']);
+    Route::get('/book/{id}', [BookController::class, 'getBook']);
+    Route::get('/popular', [BookController::class, 'getPopularBooks']);
 });
 
 Route::prefix('categories')->group(function () {
     Route::get('/', [CategoryController::class, 'index']);
+    Route::post('/', [CategoryController::class, 'store']);
+    Route::get('/{id}/books', [CategoryController::class, 'getBooks']);
+});
+
+Route::prefix('authors')->group(function () {
+    Route::get('/', [AuthorController::class, 'index']);
+    Route::post('/', [AuthorController::class, 'store']);
+    Route::get('/{id}/books', [AuthorController::class, 'getBooks']);
 });
 
 Route::prefix('auth')->group(function () {

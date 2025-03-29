@@ -2,81 +2,81 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Category;
+use App\Models\Author;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use App\Traits\RedisCacheTrait;
 use Symfony\Component\HttpFoundation\Response;
 
-class CategoryController extends Controller
+class AuthorController extends Controller
 {
     use RedisCacheTrait;
     const CACHE_DURATION = 3600;
 
     /**
-     * Get all categories
+     * Get all authors
      */
     public function index()
     {
         try {
-            $categories = $this->getCachedBookData('categories:all', self::CACHE_DURATION, function() {
-                return Category::withCount('books')->get();
+            $authors = $this->getCachedBookData('authors:all', self::CACHE_DURATION, function() {
+                return Author::withCount('books')->get();
             });
             
             return response()->json([
                 'status' => 'success',
-                'categories' => $categories
+                'authors' => $authors
             ]);
         } catch (\Exception $e) {
-            $categories = Category::withCount('books')->get();
+            $authors = Author::withCount('books')->get();
             
             return response()->json([
                 'status' => 'success',
-                'categories' => $categories
+                'authors' => $authors
             ]);
         }
     }
 
     /**
-     * Add a new category
+     * Add a new author
      */
     public function store(Request $request)
     {
         $request->validate([
-            'name' => 'required|string|max:50|unique:categories,name'
+            'name' => 'required|string|max:100|unique:authors,name'
         ]);
 
         try {
-            $category = Category::create([
+            $author = Author::create([
                 'name' => $request->name
             ]);
 
-            $this->invalidateBookCache('categories:*');
+            $this->invalidateBookCache('authors:*');
 
             return response()->json([
                 'status' => 'success',
-                'message' => 'Category added successfully',
-                'category' => $category
+                'message' => 'Author added successfully',
+                'author' => $author
             ], Response::HTTP_CREATED);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to add category',
+                'message' => 'Failed to add author',
                 'error' => $e->getMessage()
             ], Response::HTTP_BAD_REQUEST);
         }
     }
 
     /**
-     * Get books by category
+     * Get books by a specific author
      */
     public function getBooks($id)
     {
         try {
-            $category = Category::findOrFail($id);
+            $author = Author::findOrFail($id);
             
-            $books = $this->getCachedBookData("category:{$id}:books", self::CACHE_DURATION, function() use ($category) {
-                return $category->books()->with(['categories', 'authors'])->get();
+            $books = $this->getCachedBookData("author:{$id}:books", self::CACHE_DURATION, function() use ($author) {
+                return $author->books()->with(['categories', 'authors'])->get();
             });
             
             $booksWithUrls = $books->map(function($book) {
@@ -88,13 +88,13 @@ class CategoryController extends Controller
             
             return response()->json([
                 'status' => 'success',
-                'category' => $category,
+                'author' => $author,
                 'books' => $booksWithUrls
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Category not found',
+                'message' => 'Author not found',
                 'error' => $e->getMessage()
             ], Response::HTTP_NOT_FOUND);
         }
