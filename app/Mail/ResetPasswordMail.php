@@ -68,51 +68,40 @@ class ResetPasswordMail extends Mailable
      */
     private function getFrontendUrl(): string
     {
-        try {
-            // Check for Origin or Referer headers which typically contain the frontend URL
-            $origin = Request::header('Origin');
-            $referer = Request::header('Referer');
+        // Check for Origin or Referer headers which typically contain the frontend URL
+        $origin = Request::header('Origin');
+        $referer = Request::header('Referer');
+        
+        if ($origin) {
+            // Parse the origin to get just the base URL
+            $parsedUrl = parse_url($origin);
+            return $parsedUrl['scheme'] . '://' . $parsedUrl['host'] . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '');
+        }
+        
+        if ($referer) {
+            // Parse the referer to get just the base URL
+            $parsedUrl = parse_url($referer);
+            return $parsedUrl['scheme'] . '://' . $parsedUrl['host'] . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '');
+        }
+        
+        // Check SANCTUM_STATEFUL_DOMAINS for frontend domains
+        $statefulDomains = explode(',', env('SANCTUM_STATEFUL_DOMAINS', ''));
+        if (!empty($statefulDomains)) {
+            // Use the first domain that's not the backend
+            $backendHost = parse_url(config('app.url'), PHP_URL_HOST);
             
-            if ($origin) {
-                // Parse the origin to get just the base URL
-                $parsedUrl = parse_url($origin);
-                return $parsedUrl['scheme'] . '://' . $parsedUrl['host'] . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '');
-            }
-            
-            if ($referer) {
-                // Parse the referer to get just the base URL
-                $parsedUrl = parse_url($referer);
-                return $parsedUrl['scheme'] . '://' . $parsedUrl['host'] . (isset($parsedUrl['port']) ? ':' . $parsedUrl['port'] : '');
-            }
-            
-            // Check SANCTUM_STATEFUL_DOMAINS for frontend domains
-            $statefulDomains = explode(',', env('SANCTUM_STATEFUL_DOMAINS', ''));
-            if (!empty($statefulDomains)) {
-                // Use the first domain that's not the backend
-                $backendHost = parse_url(config('app.url'), PHP_URL_HOST);
-                
-                foreach ($statefulDomains as $domain) {
-                    $domain = trim($domain);
-                    if (!empty($domain) && $domain !== $backendHost && $domain !== 'localhost' && $domain !== '127.0.0.1') {
-                        // Determine if we need http or https
-                        $scheme = (app()->environment('production')) ? 'https' : 'http';
-                        return $scheme . '://' . $domain;
-                    }
+            foreach ($statefulDomains as $domain) {
+                $domain = trim($domain);
+                if (!empty($domain) && $domain !== $backendHost && $domain !== 'localhost' && $domain !== '127.0.0.1') {
+                    // Determine if we need http or https
+                    $scheme = (app()->environment('production')) ? 'https' : 'http';
+                    return $scheme . '://' . $domain;
                 }
             }
-
-            // Check if we're in production
-            if (app()->environment('production')) {
-                return 'https://bookcafe.vercel.app';
-            }
-            
-            // Fallback to localhost for development
-            return 'http://localhost:3000';
-        } catch (\Exception $e) {
-            \Log::error('Error determining frontend URL: ' . $e->getMessage());
-            // Fallback to production URL if we can't determine the correct one
-            return 'https://bookcafe.vercel.app';
         }
+        
+        // Fallback to a default
+        return env('FRONTEND_URL', 'http://localhost:3000');
     }
 
     /**
