@@ -208,8 +208,12 @@ class BookController extends Controller
                 
                 // Move cache refresh outside the transaction to prevent transaction issues
                 try {
-                    $this->refreshUserLibraryCache($user->id);
-                    $this->refreshBookCaches();
+                    if (Redis::connection()->ping()) {
+                        $this->refreshUserLibraryCache($user->id);
+                        $this->refreshBookCaches();
+                    } else {
+                        \Log::warning('Redis not available for cache refresh in addToLibrary');
+                    }
                 } catch (\Exception $cacheException) {
                     // Log cache errors but don't fail the request
                     \Log::error('Cache refresh error in addToLibrary: ' . $cacheException->getMessage());
@@ -268,8 +272,12 @@ class BookController extends Controller
                 
                 // Move cache refresh outside the transaction to prevent transaction issues
                 try {
-                    $this->refreshUserLibraryCache($user->id);
-                    $this->refreshBookCaches();
+                    if (Redis::connection()->ping()) {
+                        $this->refreshUserLibraryCache($user->id);
+                        $this->refreshBookCaches();
+                    } else {
+                        \Log::warning('Redis not available for cache refresh in removeFromLibrary');
+                    }
                 } catch (\Exception $cacheException) {
                     // Log cache errors but don't fail the request
                     \Log::error('Cache refresh error in removeFromLibrary: ' . $cacheException->getMessage());
@@ -282,7 +290,11 @@ class BookController extends Controller
             } catch (\Exception $e) {
                 \DB::rollBack();
                 \Log::error('Database error in removeFromLibrary: ' . $e->getMessage());
-                throw $e;
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to remove book from library',
+                    'error' => $e->getMessage()
+                ], Response::HTTP_INTERNAL_SERVER_ERROR);
             }
         } catch (\Exception $e) {
             \Log::error('Error in removeFromLibrary: ' . $e->getMessage());
