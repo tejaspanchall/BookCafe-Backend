@@ -13,8 +13,15 @@ trait RedisCacheTrait
     protected function getCachedBookData($key, $ttl, $callback)
     {
         try {
+            // Check if Redis is available
+            if (!Redis::connection()->ping()) {
+                \Log::warning("Redis not available for key: $key");
+                return $callback();
+            }
+            
             return Cache::remember($key, $ttl, $callback);
         } catch (\Exception $e) {
+            \Log::warning("Redis cache error for key $key: " . $e->getMessage());
             // If Redis fails, fallback to callback directly
             return $callback();
         }
@@ -46,14 +53,13 @@ trait RedisCacheTrait
                             try {
                                 Cache::forget($key);
                             } catch (\Exception $e) {
-                                // Continue regardless of individual failures
+                                \Log::warning("Failed to delete individual Redis key: $key");
                             }
                         }
                     }
                 }
             }
         } catch (\Exception $e) {
-            // Log error but continue execution
             \Log::warning("Redis cache invalidation failed for pattern $pattern: " . $e->getMessage());
         }
     }

@@ -119,35 +119,55 @@ class AuthController extends Controller
 
     public function forgotPassword(Request $request)
     {
-        $request->validate([
-            'email' => 'required|email'
-        ]);
-
-        $user = User::where('email', $request->email)->first();
-
-        if (!$user) {
-            return response()->json([
-                'error' => 'Email not found'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
         try {
+            $request->validate([
+                'email' => 'required|email'
+            ]);
+
+            $user = User::where('email', $request->email)->first();
+
+            if (!$user) {
+                return response()->json([
+                    'error' => 'Email not found'
+                ], Response::HTTP_NOT_FOUND);
+            }
+
             $reset_token = Str::random(64);
             $user->reset_token = $reset_token;
             $user->save();
 
             $this->invalidateAuthCache("auth:user:{$user->id}:*");
 
-            Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $reset_token));
-
-            return response()->json([
-                'status' => 'success',
-                'message' => 'Password reset instructions have been sent to your email'
-            ]);
+            try {
+                Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $reset_token));
+                
+                \Log::info('Password reset email sent successfully to: ' . $user->email);
+                
+                return response()->json([
+                    'status' => 'success',
+                    'message' => 'Password reset instructions have been sent to your email'
+                ]);
+            } catch (\Exception $mailException) {
+                \Log::error('Failed to send password reset email: ' . $mailException->getMessage());
+                \Log::error('Mail error details: ' . $mailException->getTraceAsString());
+                
+                // Rollback the token if email fails
+                $user->reset_token = null;
+                $user->save();
+                
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to send reset password email. Please try again later.',
+                    'error' => $mailException->getMessage()
+                ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            }
         } catch (\Exception $e) {
+            \Log::error('Error in forgotPassword: ' . $e->getMessage());
+            \Log::error('Stack trace: ' . $e->getTraceAsString());
+            
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to send reset password email',
+                'message' => 'An unexpected error occurred. Please try again later.',
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }

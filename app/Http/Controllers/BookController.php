@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\Response;
 use App\Models\User;
 use App\Models\Author;
+use Illuminate\Support\Facades\Redis;
 
 class BookController extends Controller
 {
@@ -222,7 +223,11 @@ class BookController extends Controller
             } catch (\Exception $e) {
                 \DB::rollBack();
                 \Log::error('Database error in addToLibrary: ' . $e->getMessage());
-                throw $e;
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to add book to library',
+                    'error' => $e->getMessage()
+                ], Response::HTTP_INTERNAL_SERVER_ERROR);
             }
         } catch (\Exception $e) {
             \Log::error('Error in addToLibrary: ' . $e->getMessage());
@@ -581,19 +586,23 @@ class BookController extends Controller
             $this->clearBookCaches();
 
             $books = Book::with(['users', 'categories', 'authors'])->get();
-            Cache::put('books:all', $books, self::CACHE_DURATION);
-            Cache::put('books:library', $books, self::CACHE_DURATION);
             
-            // Cache popular books
-            $popularBooks = Book::withCount('users')
-                ->with(['categories', 'authors'])
-                ->orderBy('users_count', 'desc')
-                ->take(10)
-                ->get();
-            Cache::put('books:popular', $popularBooks, self::CACHE_DURATION);
-            
+            // Check if Redis is available before attempting to cache
+            if (Redis::connection()->ping()) {
+                Cache::put('books:all', $books, self::CACHE_DURATION);
+                Cache::put('books:library', $books, self::CACHE_DURATION);
+                
+                // Cache popular books
+                $popularBooks = Book::withCount('users')
+                    ->with(['categories', 'authors'])
+                    ->orderBy('users_count', 'desc')
+                    ->take(10)
+                    ->get();
+                Cache::put('books:popular', $popularBooks, self::CACHE_DURATION);
+            } else {
+                \Log::warning('Redis not available for refreshing book caches');
+            }
         } catch (\Exception $e) {
-            // Silently fail if Redis is unavailable
             \Log::error('Error refreshing book caches: ' . $e->getMessage());
         }
     }
@@ -604,10 +613,15 @@ class BookController extends Controller
             $user = User::find($userId);
             if ($user) {
                 $books = $user->books()->with(['users', 'categories', 'authors'])->get();
-                Cache::put("books:user:{$userId}:library", $books, self::CACHE_DURATION);
+                
+                // Check if Redis is available before attempting to cache
+                if (Redis::connection()->ping()) {
+                    Cache::put("books:user:{$userId}:library", $books, self::CACHE_DURATION);
+                } else {
+                    \Log::warning("Redis not available for refreshing user library cache: $userId");
+                }
             }
         } catch (\Exception $e) {
-            // Silently fail if Redis is unavailable
             \Log::error('Error refreshing user library cache: ' . $e->getMessage());
         }
     }
@@ -615,29 +629,33 @@ class BookController extends Controller
     protected function clearBookCaches()
     {
         try {
-            Cache::forget('books:all');
-            Cache::forget('books:library');
-            Cache::forget('books:popular');
-            
-            // Also clear search caches
-            $this->invalidateBookCache('books:search:*');
-            
-            // Clear individual book caches
-            $this->invalidateBookCache('book:*');
-            
-            // Clear category-related book caches
-            $this->invalidateBookCache('category:*:books');
-            
-            // Clear author-related book caches
-            $this->invalidateBookCache('author:*:books');
-            
-            // Clear user library caches
-            $users = User::all();
-            foreach ($users as $user) {
-                Cache::forget("books:user:{$user->id}:library");
+            // Check if Redis is available before attempting to clear caches
+            if (Redis::connection()->ping()) {
+                Cache::forget('books:all');
+                Cache::forget('books:library');
+                Cache::forget('books:popular');
+                
+                // Also clear search caches
+                $this->invalidateBookCache('books:search:*');
+                
+                // Clear individual book caches
+                $this->invalidateBookCache('book:*');
+                
+                // Clear category-related book caches
+                $this->invalidateBookCache('category:*:books');
+                
+                // Clear author-related book caches
+                $this->invalidateBookCache('author:*:books');
+                
+                // Clear user library caches
+                $users = User::all();
+                foreach ($users as $user) {
+                    Cache::forget("books:user:{$user->id}:library");
+                }
+            } else {
+                \Log::warning('Redis not available for clearing book caches');
             }
         } catch (\Exception $e) {
-            // Silently fail if Redis is unavailable
             \Log::error('Error clearing book caches: ' . $e->getMessage());
         }
     }
