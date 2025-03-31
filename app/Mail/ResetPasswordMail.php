@@ -93,15 +93,24 @@ class ResetPasswordMail extends Mailable
             foreach ($statefulDomains as $domain) {
                 $domain = trim($domain);
                 if (!empty($domain) && $domain !== $backendHost && $domain !== 'localhost' && $domain !== '127.0.0.1') {
-                    // Determine if we need http or https
-                    $scheme = (app()->environment('production')) ? 'https' : 'http';
+                    // Determine if we need http or https based on the domain
+                    $scheme = (str_contains($domain, 'vercel.app') || str_contains($domain, '.com') || str_contains($domain, '.net')) ? 'https' : 'http';
                     return $scheme . '://' . $domain;
                 }
             }
         }
         
-        // Fallback to a default
-        return env('FRONTEND_URL', 'http://localhost:3000');
+        // If we're in production, try to get the frontend URL from the request
+        if (app()->environment('production')) {
+            $host = Request::header('Host');
+            if ($host) {
+                $scheme = Request::secure() ? 'https' : 'http';
+                return $scheme . '://' . $host;
+            }
+        }
+        
+        // Fallback to localhost for development
+        return 'http://localhost:3000';
     }
 
     /**

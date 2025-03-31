@@ -145,10 +145,17 @@ class AuthController extends Controller
                 'message' => 'Password reset instructions have been sent to your email'
             ]);
         } catch (\Exception $e) {
+            \Log::error('Password reset email failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'user_email' => $user->email
+            ]);
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to send reset password email',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'details' => 'Please check your mail configuration and try again'
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
