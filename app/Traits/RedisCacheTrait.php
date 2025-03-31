@@ -26,12 +26,35 @@ trait RedisCacheTrait
     protected function invalidateBookCache($pattern)
     {
         try {
+            // Check if Redis is available
+            if (!Redis::connection()->ping()) {
+                \Log::warning("Redis not available for pattern deletion: $pattern");
+                return;
+            }
+            
             $keys = Redis::keys($pattern);
             if (!empty($keys)) {
-                Redis::del($keys);
+                // Process keys in smaller batches to avoid timeouts
+                $chunks = array_chunk($keys, 10);
+                foreach ($chunks as $chunk) {
+                    try {
+                        Redis::del($chunk);
+                    } catch (\Exception $innerEx) {
+                        \Log::warning("Failed to delete Redis keys batch: " . $innerEx->getMessage());
+                        // Try individual deletions if batch fails
+                        foreach ($chunk as $key) {
+                            try {
+                                Cache::forget($key);
+                            } catch (\Exception $e) {
+                                // Continue regardless of individual failures
+                            }
+                        }
+                    }
+                }
             }
         } catch (\Exception $e) {
-            // Silently fail if Redis is unavailable
+            // Log error but continue execution
+            \Log::warning("Redis cache invalidation failed for pattern $pattern: " . $e->getMessage());
         }
     }
 } 

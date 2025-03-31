@@ -200,13 +200,19 @@ class BookController extends Controller
             \DB::beginTransaction();
 
             try {
+                // Add the book to user's library
                 $user->books()->attach($book->id);
-
-                $this->refreshUserLibraryCache($user->id);
-
-                $this->refreshBookCaches();
-
+                
                 \DB::commit();
+                
+                // Move cache refresh outside the transaction to prevent transaction issues
+                try {
+                    $this->refreshUserLibraryCache($user->id);
+                    $this->refreshBookCaches();
+                } catch (\Exception $cacheException) {
+                    // Log cache errors but don't fail the request
+                    \Log::error('Cache refresh error in addToLibrary: ' . $cacheException->getMessage());
+                }
 
                 return response()->json([
                     'status' => 'success',
@@ -215,9 +221,11 @@ class BookController extends Controller
                 ]);
             } catch (\Exception $e) {
                 \DB::rollBack();
+                \Log::error('Database error in addToLibrary: ' . $e->getMessage());
                 throw $e;
             }
         } catch (\Exception $e) {
+            \Log::error('Error in addToLibrary: ' . $e->getMessage());
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to add book to library',
@@ -248,13 +256,19 @@ class BookController extends Controller
             \DB::beginTransaction();
 
             try {
+                // Remove the book from the user's library
                 $user->books()->detach($book->id);
-
-                $this->refreshUserLibraryCache($user->id);
-
-                $this->refreshBookCaches();
-
+                
                 \DB::commit();
+                
+                // Move cache refresh outside the transaction to prevent transaction issues
+                try {
+                    $this->refreshUserLibraryCache($user->id);
+                    $this->refreshBookCaches();
+                } catch (\Exception $cacheException) {
+                    // Log cache errors but don't fail the request
+                    \Log::error('Cache refresh error in removeFromLibrary: ' . $cacheException->getMessage());
+                }
 
                 return response()->json([
                     'status' => 'success',
@@ -262,9 +276,11 @@ class BookController extends Controller
                 ]);
             } catch (\Exception $e) {
                 \DB::rollBack();
+                \Log::error('Database error in removeFromLibrary: ' . $e->getMessage());
                 throw $e;
             }
         } catch (\Exception $e) {
+            \Log::error('Error in removeFromLibrary: ' . $e->getMessage());
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to remove book from library',
