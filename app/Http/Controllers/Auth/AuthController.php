@@ -138,7 +138,18 @@ class AuthController extends Controller
 
             $this->invalidateAuthCache("auth:user:{$user->id}:*");
 
+            // Log email attempt
+            \Log::info('Attempting to send password reset email', [
+                'user_email' => $user->email,
+                'environment' => app()->environment()
+            ]);
+
             Mail::to($user->email)->send(new \App\Mail\ResetPasswordMail($user, $reset_token));
+
+            // Log success
+            \Log::info('Password reset email sent successfully', [
+                'user_email' => $user->email
+            ]);
 
             return response()->json([
                 'status' => 'success',
@@ -148,8 +159,17 @@ class AuthController extends Controller
             \Log::error('Password reset email failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'user_email' => $user->email
+                'user_email' => $user->email,
+                'environment' => app()->environment()
             ]);
+
+            // In production, don't expose detailed error messages
+            if (app()->environment('production')) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Failed to send reset password email. Please try again later.'
+                ], Response::HTTP_INTERNAL_SERVER_ERROR);
+            }
 
             return response()->json([
                 'status' => 'error',

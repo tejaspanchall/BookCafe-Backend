@@ -4,6 +4,7 @@ namespace App\Traits;
 
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Redis;
+use Illuminate\Support\Facades\Log;
 
 trait AuthCacheTrait
 {
@@ -26,7 +27,8 @@ trait AuthCacheTrait
                 Redis::del($keys);
             }
         } catch (\Exception $e) {
-            // Silently fail if Redis is unavailable
+            // Log the error but continue execution
+            Log::warning("Failed to invalidate cache with pattern {$pattern}: " . $e->getMessage());
         }
     }
 

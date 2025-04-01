@@ -68,6 +68,12 @@ class ResetPasswordMail extends Mailable
      */
     private function getFrontendUrl(): string
     {
+        // For production environment, use a hardcoded URL first
+        if (app()->environment('production')) {
+            // Use a specific production frontend URL
+            return 'https://bookcafe-frontend.vercel.app';
+        }
+        
         // Check for Origin or Referer headers which typically contain the frontend URL
         $origin = Request::header('Origin');
         $referer = Request::header('Referer');
@@ -97,15 +103,6 @@ class ResetPasswordMail extends Mailable
                     $scheme = (str_contains($domain, 'vercel.app') || str_contains($domain, '.com') || str_contains($domain, '.net')) ? 'https' : 'http';
                     return $scheme . '://' . $domain;
                 }
-            }
-        }
-        
-        // If we're in production, try to get the frontend URL from the request
-        if (app()->environment('production')) {
-            $host = Request::header('Host');
-            if ($host) {
-                $scheme = Request::secure() ? 'https' : 'http';
-                return $scheme . '://' . $host;
             }
         }
         
