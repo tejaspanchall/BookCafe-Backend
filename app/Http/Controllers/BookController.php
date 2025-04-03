@@ -406,7 +406,7 @@ class BookController extends Controller
     {
         try {
             $query = $request->input('query', '');
-            $type = $request->input('type', 'name'); // Default to name if not provided
+            $type = $request->input('type', 'all'); // Default to 'all' instead of 'name'
             
             if (empty($query)) {
                 return response()->json([
@@ -431,7 +431,6 @@ class BookController extends Controller
                         $bookQuery->whereRaw('LOWER(isbn) LIKE ?', ['%' . strtolower($query) . '%']);
                         break;
                     case 'name':
-                    default:
                         // Enhanced search to find books by any word in the title
                         $lowercaseQuery = strtolower($query);
                         $bookQuery->where(function($q) use ($lowercaseQuery) {
@@ -442,6 +441,28 @@ class BookController extends Controller
                               ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
                               // Match word at the end
                               ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery]);
+                        });
+                        break;
+                    case 'all':
+                    default:
+                        // Search across title, author, and ISBN
+                        $lowercaseQuery = strtolower($query);
+                        $bookQuery->where(function($q) use ($lowercaseQuery, $query) {
+                            // Search by title
+                            $q->whereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%'])
+                              // Match word at beginning
+                              ->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . ' %'])
+                              // Match word in the middle
+                              ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
+                              // Match word at the end
+                              ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery])
+                              // Search by ISBN
+                              ->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                            
+                            // Search by author name
+                            $q->orWhereHas('authors', function($authorQuery) use ($query) {
+                                $authorQuery->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%']);
+                            });
                         });
                         break;
                 }
@@ -476,7 +497,6 @@ class BookController extends Controller
                     $bookQuery->whereRaw('LOWER(isbn) LIKE ?', ['%' . strtolower($query) . '%']);
                     break;
                 case 'name':
-                default:
                     // Enhanced search to find books by any word in the title
                     $lowercaseQuery = strtolower($query);
                     $bookQuery->where(function($q) use ($lowercaseQuery) {
@@ -487,6 +507,28 @@ class BookController extends Controller
                           ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
                           // Match word at the end
                           ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery]);
+                    });
+                    break;
+                case 'all':
+                default:
+                    // Search across title, author, and ISBN
+                    $lowercaseQuery = strtolower($query);
+                    $bookQuery->where(function($q) use ($lowercaseQuery, $query) {
+                        // Search by title
+                        $q->whereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%'])
+                          // Match word at beginning
+                          ->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . ' %'])
+                          // Match word in the middle
+                          ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
+                          // Match word at the end
+                          ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery])
+                          // Search by ISBN
+                          ->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                        
+                        // Search by author name
+                        $q->orWhereHas('authors', function($authorQuery) use ($query) {
+                            $authorQuery->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%']);
+                        });
                     });
                     break;
             }
