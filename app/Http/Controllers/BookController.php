@@ -82,12 +82,14 @@ class BookController extends Controller
         }
     }
 
+    /**
+     * Get all books
+     */
     public function getBooks()
     {
         try {
-            $books = $this->getCachedBookData('books:all', self::CACHE_DURATION, function() {
-                return Book::with(['users', 'categories', 'authors'])->get();
-            });
+            // Bypass cache and get books directly from the database
+            $books = Book::with(['users', 'categories', 'authors'])->get();
             
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 
@@ -95,25 +97,17 @@ class BookController extends Controller
                     : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
                 return $book;
             });
-
+            
             return response()->json([
                 'status' => 'success',
                 'books' => $booksWithUrls
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching books: ' . $e->getMessage());
-            $books = Book::with(['users', 'categories', 'authors'])->get();
-            $booksWithUrls = $books->map(function($book) {
-                $book->image_url = $book->image 
-                    ? url('storage/books/' . urlencode($book->image))
-                    : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
-                return $book;
-            });
-
             return response()->json([
-                'status' => 'success',
-                'books' => $booksWithUrls
-            ]);
+                'status' => 'error',
+                'message' => 'Failed to retrieve books',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
@@ -123,11 +117,8 @@ class BookController extends Controller
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
         }
 
-        $cacheKey = 'books:library';
-        
-        $books = $this->getCachedBookData($cacheKey, self::CACHE_DURATION, function() {
-            return Book::with(['categories', 'authors'])->get();
-        });
+        // Bypass cache and get books directly from the database
+        $books = Book::with(['categories', 'authors'])->get();
         
         $booksWithUrls = $books->map(function($book) {
             $book->image_url = $book->image 
@@ -423,47 +414,21 @@ class BookController extends Controller
                 // Apply different search criteria based on type
                 switch($type) {
                     case 'author':
-                        $bookQuery->whereHas('authors', function($q) use ($query) {
-                            $q->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%']);
-                        });
+                        // Use full-text search for author name
+                        $bookQuery->searchByAuthor($query);
                         break;
                     case 'isbn':
-                        $bookQuery->whereRaw('LOWER(isbn) LIKE ?', ['%' . strtolower($query) . '%']);
+                        // Use full-text search for ISBN
+                        $bookQuery->searchByIsbn($query);
                         break;
                     case 'name':
-                        // Enhanced search to find books by any word in the title
-                        $lowercaseQuery = strtolower($query);
-                        $bookQuery->where(function($q) use ($lowercaseQuery) {
-                            $q->whereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%'])
-                              // Match word at beginning
-                              ->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . ' %'])
-                              // Match word in the middle
-                              ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
-                              // Match word at the end
-                              ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery]);
-                        });
+                        // Use full-text search for title
+                        $bookQuery->searchByTitle($query);
                         break;
                     case 'all':
                     default:
-                        // Search across title, author, and ISBN
-                        $lowercaseQuery = strtolower($query);
-                        $bookQuery->where(function($q) use ($lowercaseQuery, $query) {
-                            // Search by title
-                            $q->whereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%'])
-                              // Match word at beginning
-                              ->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . ' %'])
-                              // Match word in the middle
-                              ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
-                              // Match word at the end
-                              ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery])
-                              // Search by ISBN
-                              ->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $lowercaseQuery . '%']);
-                            
-                            // Search by author name
-                            $q->orWhereHas('authors', function($authorQuery) use ($query) {
-                                $authorQuery->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%']);
-                            });
-                        });
+                        // Use full-text search across all fields
+                        $bookQuery->searchAll($query);
                         break;
                 }
                 
@@ -484,50 +449,34 @@ class BookController extends Controller
         } catch (\Exception $e) {
             \Log::error('Error searching books: ' . $e->getMessage());
             
+            // Fallback to basic search if full-text search fails
             $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
+            $lowercaseQuery = strtolower($query);
             
             // Apply different search criteria based on type
             switch($type) {
                 case 'author':
-                    $bookQuery->whereHas('authors', function($q) use ($query) {
-                        $q->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%']);
+                    $bookQuery->whereHas('authors', function($q) use ($lowercaseQuery) {
+                        $q->whereRaw('LOWER(name) LIKE ?', [$lowercaseQuery . '%']);
                     });
                     break;
                 case 'isbn':
-                    $bookQuery->whereRaw('LOWER(isbn) LIKE ?', ['%' . strtolower($query) . '%']);
+                    $bookQuery->whereRaw('LOWER(isbn) LIKE ?', [$lowercaseQuery . '%']);
                     break;
                 case 'name':
-                    // Enhanced search to find books by any word in the title
-                    $lowercaseQuery = strtolower($query);
-                    $bookQuery->where(function($q) use ($lowercaseQuery) {
-                        $q->whereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%'])
-                          // Match word at beginning
-                          ->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . ' %'])
-                          // Match word in the middle
-                          ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
-                          // Match word at the end
-                          ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery]);
-                    });
+                    $bookQuery->whereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . '%']);
                     break;
                 case 'all':
                 default:
-                    // Search across title, author, and ISBN
-                    $lowercaseQuery = strtolower($query);
-                    $bookQuery->where(function($q) use ($lowercaseQuery, $query) {
+                    $bookQuery->where(function($q) use ($lowercaseQuery) {
                         // Search by title
-                        $q->whereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%'])
-                          // Match word at beginning
-                          ->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . ' %'])
-                          // Match word in the middle
-                          ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery . ' %'])
-                          // Match word at the end
-                          ->orWhereRaw('LOWER(title) LIKE ?', ['% ' . $lowercaseQuery])
+                        $q->whereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . '%'])
                           // Search by ISBN
-                          ->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                          ->orWhereRaw('LOWER(isbn) LIKE ?', [$lowercaseQuery . '%']);
                         
                         // Search by author name
-                        $q->orWhereHas('authors', function($authorQuery) use ($query) {
-                            $authorQuery->whereRaw('LOWER(name) LIKE ?', ['%' . strtolower($query) . '%']);
+                        $q->orWhereHas('authors', function($authorQuery) use ($lowercaseQuery) {
+                            $authorQuery->whereRaw('LOWER(name) LIKE ?', [$lowercaseQuery . '%']);
                         });
                     });
                     break;

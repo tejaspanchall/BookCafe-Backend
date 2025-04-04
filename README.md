@@ -20,7 +20,7 @@ Data is stored primarily in PostgreSQL with Redis caching for improved performan
 
 - 📚 Book management system with categorization and author attribution
 - 👥 User authentication and authorization with Sanctum
-- 🔍 Advanced search and filtering capabilities
+- 🔍 Advanced search and filtering capabilities with PostgreSQL full-text search
 - 🔒 Robust security features
 - 📊 User-specific book library management
 - 💾 Redis caching for improved performance
@@ -31,6 +31,7 @@ Data is stored primarily in PostgreSQL with Redis caching for improved performan
 - **Framework**: Laravel 12
 - **PHP Version**: 8.2+
 - **Primary Database**: PostgreSQL
+- **Search Technology**: PostgreSQL full-text search with tsvector
 - **Caching**: Redis
 - **Authentication**: Laravel Sanctum
 - **Queue System**: Laravel Queue with Database Driver
@@ -90,7 +91,12 @@ php artisan db:seed
 php artisan storage:link
 ```
 
-7. Start the development server:
+7. Update search vectors for full-text search:
+```bash
+php artisan search:update-vectors
+```
+
+8. Start the development server:
 ```bash
 php artisan serve
 ```
@@ -151,6 +157,34 @@ redis-cli
 > SELECT 1
 > KEYS *
 ```
+
+## Full-Text Search
+
+The application uses PostgreSQL's powerful full-text search capabilities for efficient and accurate book searching. It implements:
+
+- Search by title, author, and ISBN
+- Support for prefix matching
+- Special handling for short search terms (1-3 characters)
+- Query optimization for search relevancy
+
+### Search Functionality
+- **Title Search**: Search books by title
+- **Author Search**: Search books by author name
+- **ISBN Search**: Search books by ISBN number
+- **All Fields Search**: Search across all searchable fields
+
+### Initialize/Update Search Vectors
+
+After adding new books or updating existing ones, run the following command to update the search vectors:
+
+```bash
+php artisan search:update-vectors
+```
+
+This command:
+1. Updates the `search_vector` column for all books with data from their title and ISBN fields
+2. Merges author names into the search vectors for more comprehensive search results
+3. Optimizes the search vectors for prefix matching and text similarity
 
 ## Seed Database with 100 Popular books (*Optional*)
 ```bash
