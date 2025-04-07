@@ -85,8 +85,8 @@ class Book extends Model
 
     /**
      * Prepare the search query for PostgreSQL full-text search.
-     * This approach uses a combination of explicit prefix matching and basic SQL LIKE
-     * to ensure better results with short queries.
+     * This approach uses consistent prefix matching with :* suffix for to_tsquery
+     * and proper tokenization for multi-word searches.
      *
      * @param  string  $searchQuery
      * @return string
@@ -117,45 +117,54 @@ class Book extends Model
             $term = trim($term);
             
             if (!empty($term)) {
-                // For very short terms (1-2 characters), we use a special approach
-                if (mb_strlen($term) <= 2) {
-                    // Add multiple variations with the :* operator to increase matches
-                    $variations = [
-                        $term . ':*'
-                    ];
-                    
-                    // Add common prefixes that might start with this term
-                    $prefix = strtolower($term);
-                    if ($prefix === 'a') {
-                        $variations[] = 'an:*';
-                        $variations[] = 'at:*';
-                    } elseif ($prefix === 'o') {
-                        $variations[] = 'on:*';
-                        $variations[] = 'of:*';
-                        $variations[] = 'or:*';
-                        $variations[] = 'one:*';
-                    } elseif ($prefix === 'th') {
-                        $variations[] = 'the:*';
-                        $variations[] = 'that:*';
-                        $variations[] = 'this:*';
-                        $variations[] = 'they:*';
-                    } elseif ($prefix === 'i') {
-                        $variations[] = 'in:*';
-                        $variations[] = 'is:*';
-                        $variations[] = 'it:*';
-                    }
-                    
-                    // Add the variations with OR operator
-                    $formattedTerms[] = '(' . implode(' | ', $variations) . ')';
-                } else {
-                    // For longer terms, just add the :* operator for prefix matching
-                    $formattedTerms[] = $term . ':*';
+                // Always add the :* operator for prefix matching
+                $formattedTerms[] = $term . ':*';
+            }
+        }
+        
+        // Join with & operator for AND logic between terms
+        return implode(' & ', $formattedTerms);
+    }
+
+    /**
+     * Get the ILIKE conditions for fuzzy matching.
+     * This complements the full-text search with more flexible matching.
+     *
+     * @param  string  $searchQuery
+     * @param  string  $column
+     * @return array
+     */
+    private function getIlikeConditions(string $searchQuery, string $column): array
+    {
+        // Clean and trim search query
+        $searchQuery = trim($searchQuery);
+        
+        if (empty($searchQuery)) {
+            return [];
+        }
+        
+        $conditions = [];
+        
+        // Exact match (highest priority)
+        $conditions[] = ["LOWER($column) = ?", strtolower($searchQuery)];
+        
+        // Starts with (high priority)
+        $conditions[] = ["LOWER($column) LIKE ?", strtolower($searchQuery) . '%'];
+        
+        // Contains (medium priority)
+        $conditions[] = ["LOWER($column) LIKE ?", '%' . strtolower($searchQuery) . '%'];
+        
+        // If we have multiple words, create conditions for individual words
+        $words = array_filter(explode(' ', $searchQuery));
+        if (count($words) > 1) {
+            foreach ($words as $word) {
+                if (strlen($word) > 2) { // Only consider words longer than 2 chars
+                    $conditions[] = ["LOWER($column) LIKE ?", '%' . strtolower($word) . '%'];
                 }
             }
         }
         
-        // Join with & operator for AND logic
-        return implode(' & ', $formattedTerms);
+        return $conditions;
     }
 
     /**
@@ -167,17 +176,33 @@ class Book extends Model
      */
     public function scopeSearch(Builder $query, string $searchQuery)
     {
-        $preparedQuery = $this->prepareSearchQuery($searchQuery);
+        $searchQuery = trim($searchQuery);
         
-        if (empty($preparedQuery)) {
+        if (empty($searchQuery)) {
             return $query->whereRaw('1=0'); // Empty result if query is empty
         }
         
-        return $query->whereRaw("search_vector @@ to_tsquery('english', ?)", [
-            $preparedQuery
-        ])->orderByRaw("ts_rank(search_vector, to_tsquery('english', ?)) DESC", [
-            $preparedQuery
-        ]);
+        // Prepare query for full-text search
+        $preparedQuery = $this->prepareSearchQuery($searchQuery);
+        
+        return $query->where(function($q) use ($preparedQuery, $searchQuery) {
+            // First try full-text search
+            $q->whereRaw("search_vector @@ to_tsquery('english', ?)", [$preparedQuery]);
+            
+            // Then add ILIKE conditions for better fuzzy matching
+            $ilikeConditions = $this->getIlikeConditions($searchQuery, 'title');
+            foreach ($ilikeConditions as [$condition, $value]) {
+                $q->orWhereRaw($condition, [$value]);
+            }
+        })->orderByRaw("
+            ts_rank(search_vector, to_tsquery('english', ?)) DESC,
+            CASE 
+                WHEN LOWER(title) = ? THEN 1
+                WHEN LOWER(title) LIKE ? THEN 2
+                WHEN LOWER(title) LIKE ? THEN 3
+                ELSE 4
+            END
+        ", [$preparedQuery, strtolower($searchQuery), strtolower($searchQuery) . '%', '%' . strtolower($searchQuery) . '%']);
     }
 
     /**
@@ -196,31 +221,29 @@ class Book extends Model
             return $query->whereRaw('1=0'); // Empty result if query is empty
         }
         
-        // For very short queries (1-2 characters), use direct LIKE for better matching
-        if (mb_strlen($searchQuery) <= 2) {
-            return $query->where(function ($q) use ($searchQuery) {
-                // Case-insensitive LIKE search with prefix matching
-                $q->whereRaw('LOWER(title) LIKE ?', [strtolower($searchQuery) . '%']);
-                
-                // If searching for 'o', also match 'one', etc.
-                if (strtolower($searchQuery) === 'o') {
-                    $q->orWhereRaw('LOWER(title) LIKE ?', ['one%']);
-                } elseif (strtolower($searchQuery) === 'a') {
-                    $q->orWhereRaw('LOWER(title) LIKE ?', ['an%']);
-                } elseif (strtolower($searchQuery) === 'th') {
-                    $q->orWhereRaw('LOWER(title) LIKE ?', ['the%']);
-                }
-            })->orderByRaw('LENGTH(title) ASC'); // Shorter titles first
-        }
-        
-        // For longer queries, use full-text search
+        // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
-        return $query->whereRaw("to_tsvector('english', COALESCE(title, '')) @@ to_tsquery('english', ?)", [
-            $preparedQuery
-        ])->orderByRaw("ts_rank(to_tsvector('english', COALESCE(title, '')), to_tsquery('english', ?)) DESC", [
-            $preparedQuery
-        ]);
+        return $query->where(function($q) use ($preparedQuery, $searchQuery) {
+            // Full-text search on title
+            $q->whereRaw("to_tsvector('english', COALESCE(title, '')) @@ to_tsquery('english', ?)", [
+                $preparedQuery
+            ]);
+            
+            // Add ILIKE conditions for better fuzzy matching
+            $ilikeConditions = $this->getIlikeConditions($searchQuery, 'title');
+            foreach ($ilikeConditions as [$condition, $value]) {
+                $q->orWhereRaw($condition, [$value]);
+            }
+        })->orderByRaw("
+            ts_rank(to_tsvector('english', COALESCE(title, '')), to_tsquery('english', ?)) DESC,
+            CASE 
+                WHEN LOWER(title) = ? THEN 1
+                WHEN LOWER(title) LIKE ? THEN 2
+                WHEN LOWER(title) LIKE ? THEN 3
+                ELSE 4
+            END
+        ", [$preparedQuery, strtolower($searchQuery), strtolower($searchQuery) . '%', '%' . strtolower($searchQuery) . '%']);
     }
 
     /**
@@ -239,30 +262,20 @@ class Book extends Model
             return $query->whereRaw('1=0'); // Empty result if query is empty
         }
         
-        // For very short queries (1-2 characters), use direct LIKE for better matching
-        if (mb_strlen($searchQuery) <= 2) {
-            return $query->whereHas('authors', function($q) use ($searchQuery) {
-                // Case-insensitive LIKE search with prefix matching
-                $q->whereRaw('LOWER(name) LIKE ?', [strtolower($searchQuery) . '%']);
-                
-                // If searching for specific short prefixes, add common variations
-                if (strtolower($searchQuery) === 'j') {
-                    $q->orWhereRaw('LOWER(name) LIKE ?', ['jo%']);
-                    $q->orWhereRaw('LOWER(name) LIKE ?', ['ja%']);
-                } elseif (strtolower($searchQuery) === 'm') {
-                    $q->orWhereRaw('LOWER(name) LIKE ?', ['mi%']);
-                    $q->orWhereRaw('LOWER(name) LIKE ?', ['ma%']);
-                }
-            });
-        }
-        
-        // For longer queries, use full-text search
+        // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
-        return $query->whereHas('authors', function($q) use ($preparedQuery) {
+        return $query->whereHas('authors', function($q) use ($preparedQuery, $searchQuery) {
+            // Full-text search on author name
             $q->whereRaw("to_tsvector('english', name) @@ to_tsquery('english', ?)", [
                 $preparedQuery
             ]);
+            
+            // Add ILIKE conditions for better fuzzy matching
+            $ilikeConditions = $this->getIlikeConditions($searchQuery, 'name');
+            foreach ($ilikeConditions as [$condition, $value]) {
+                $q->orWhereRaw($condition, [$value]);
+            }
         });
     }
 
@@ -282,18 +295,32 @@ class Book extends Model
             return $query->whereRaw('1=0'); // Empty result if query is empty
         }
         
-        // For ISBNs, LIKE is generally more reliable for partial prefix matching
-        // than full-text search, especially for numeric sequences
-        if (mb_strlen($searchQuery) <= 6) {
-            return $query->whereRaw('isbn LIKE ?', [$searchQuery . '%']);
-        }
-        
-        // For longer queries, use full-text search
-        $preparedQuery = $this->prepareSearchQuery($searchQuery);
-        
-        return $query->whereRaw("to_tsvector('english', COALESCE(isbn, '')) @@ to_tsquery('english', ?)", [
-            $preparedQuery
-        ]);
+        // ISBNs are special - they work better with direct LIKE matching
+        return $query->where(function($q) use ($searchQuery) {
+            // Exact match
+            $q->whereRaw('isbn = ?', [$searchQuery]);
+            
+            // Starts with (common for partial ISBNs)
+            $q->orWhereRaw('isbn LIKE ?', [$searchQuery . '%']);
+            
+            // Contains (for wildcard matching)
+            $q->orWhereRaw('isbn LIKE ?', ['%' . $searchQuery . '%']);
+            
+            // If it looks like a formatted ISBN, try to match without formatting
+            if (str_contains($searchQuery, '-')) {
+                $plainIsbn = str_replace('-', '', $searchQuery);
+                $q->orWhereRaw('isbn = ?', [$plainIsbn]);
+                $q->orWhereRaw('isbn LIKE ?', [$plainIsbn . '%']);
+                $q->orWhereRaw('isbn LIKE ?', ['%' . $plainIsbn . '%']);
+            }
+        })->orderByRaw("
+            CASE 
+                WHEN isbn = ? THEN 1
+                WHEN isbn LIKE ? THEN 2
+                WHEN isbn LIKE ? THEN 3
+                ELSE 4
+            END
+        ", [$searchQuery, $searchQuery . '%', '%' . $searchQuery . '%']);
     }
 
     /**
@@ -313,62 +340,59 @@ class Book extends Model
             return $query->whereRaw('1=0'); // Empty result if query is empty
         }
         
-        // For very short queries (1-3 characters), use direct LIKE for better matching
-        if (mb_strlen($searchQuery) <= 3) {
-            return $query->where(function($q) use ($searchQuery) {
-                // Search by title with LIKE
-                $q->where(function($titleQ) use ($searchQuery) {
-                    // Case-insensitive LIKE search with prefix matching
-                    $titleQ->whereRaw('LOWER(title) LIKE ?', [strtolower($searchQuery) . '%']);
-                    
-                    // Add common variations for short prefixes
-                    if (strtolower($searchQuery) === 'o') {
-                        $titleQ->orWhereRaw('LOWER(title) LIKE ?', ['one%']);
-                    } elseif (strtolower($searchQuery) === 'a') {
-                        $titleQ->orWhereRaw('LOWER(title) LIKE ?', ['an%']);
-                    } elseif (strtolower($searchQuery) === 'th') {
-                        $titleQ->orWhereRaw('LOWER(title) LIKE ?', ['the%']);
-                    } elseif (strtolower($searchQuery) === 'mo') {
-                        $titleQ->orWhereRaw('LOWER(title) LIKE ?', ['moc%']);
-                        $titleQ->orWhereRaw('LOWER(title) LIKE ?', ['%mock%']);
-                    }
-                    
-                    // Also search within words for very specific cases
-                    if (in_array(strtolower($searchQuery), ['mo', 'moc', 'mock'])) {
-                        $titleQ->orWhereRaw('LOWER(title) LIKE ?', ['%' . strtolower($searchQuery) . '%']);
-                    }
-                })
-                // Search by ISBN with LIKE
-                ->orWhereRaw('isbn LIKE ?', [$searchQuery . '%'])
-                // Search by author name with LIKE
-                ->orWhereHas('authors', function($authorQ) use ($searchQuery) {
-                    $authorQ->whereRaw('LOWER(name) LIKE ?', [strtolower($searchQuery) . '%']);
-                });
-            })->orderByRaw('LENGTH(title) ASC'); // Shorter titles first
-        }
-        
-        // For longer queries, use full-text search
+        // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
-        return $query->where(function($q) use ($preparedQuery) {
-            // Search by title
+        return $query->where(function($q) use ($preparedQuery, $searchQuery) {
+            // FULL TEXT SEARCH
+            
+            // Search by title with full-text
             $q->whereRaw("to_tsvector('english', COALESCE(title, '')) @@ to_tsquery('english', ?)", [
-                $preparedQuery
-            ])
-            // Search by ISBN
-            ->orWhereRaw("to_tsvector('english', COALESCE(isbn, '')) @@ to_tsquery('english', ?)", [
                 $preparedQuery
             ]);
             
-            // Search by author name
+            // Search by ISBN with full-text
+            $q->orWhereRaw("to_tsvector('english', COALESCE(isbn, '')) @@ to_tsquery('english', ?)", [
+                $preparedQuery
+            ]);
+            
+            // Search by author name with full-text
             $q->orWhereHas('authors', function($authorQuery) use ($preparedQuery) {
                 $authorQuery->whereRaw("to_tsvector('english', name) @@ to_tsquery('english', ?)", [
                     $preparedQuery
                 ]);
             });
+            
+            // FUZZY MATCHING WITH ILIKE
+            
+            // Title ILIKE conditions
+            $titleConditions = $this->getIlikeConditions($searchQuery, 'title');
+            foreach ($titleConditions as [$condition, $value]) {
+                $q->orWhereRaw($condition, [$value]);
+            }
+            
+            // ISBN ILIKE conditions - simpler since it's more structured
+            $q->orWhereRaw('isbn = ?', [$searchQuery]);
+            $q->orWhereRaw('isbn LIKE ?', [$searchQuery . '%']);
+            
+            // Author ILIKE conditions
+            $q->orWhereHas('authors', function($authorQuery) use ($searchQuery) {
+                $nameConditions = $this->getIlikeConditions($searchQuery, 'name');
+                $authorQuery->where(function($subQ) use ($nameConditions) {
+                    foreach ($nameConditions as [$condition, $value]) {
+                        $subQ->orWhereRaw($condition, [$value]);
+                    }
+                });
+            });
         })->orderByRaw("
             ts_rank(to_tsvector('english', COALESCE(title, '')), to_tsquery('english', ?)) +
-            ts_rank(to_tsvector('english', COALESCE(isbn, '')), to_tsquery('english', ?)) DESC
-        ", [$preparedQuery, $preparedQuery]);
+            ts_rank(to_tsvector('english', COALESCE(isbn, '')), to_tsquery('english', ?)) DESC,
+            CASE 
+                WHEN LOWER(title) = ? THEN 1
+                WHEN LOWER(title) LIKE ? THEN 2
+                WHEN LOWER(title) LIKE ? THEN 3
+                ELSE 4
+            END
+        ", [$preparedQuery, $preparedQuery, strtolower($searchQuery), strtolower($searchQuery) . '%', '%' . strtolower($searchQuery) . '%']);
     }
 }
