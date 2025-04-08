@@ -196,97 +196,61 @@ class Book extends Model
         if (empty($searchQuery)) {
             return $query->whereRaw('1=0'); // Empty result if query is empty
         }
-        
+
         // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
         // Create an array of words from the query for word-by-word matching
-        $stopWords = ['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'as'];
-        $searchTerms = $searchQuery; // Store the original search query for later use
-        $words = array_filter(explode(' ', $searchTerms), function($word) use ($stopWords, $searchTerms) {
-            return strlen($word) > 1 && (!in_array(strtolower($word), $stopWords) || count(explode(' ', $searchTerms)) <= 2);
+        $words = array_filter(explode(' ', $searchQuery), function($word) {
+            return strlen($word) > 1;
         });
         
-        // Get the query columns, or default to '*'
-        $columns = $query->getQuery()->columns ?? ['*'];
+        // Get conditions that match the beginning of words
+        $conditions = $this->getWordBeginningConditions($searchQuery, 'title');
         
-        // First find exact title matches
-        $exactMatches = clone $query;
-        $exactMatches = $exactMatches->newQuery()
-            ->select($columns)
-            ->whereRaw("LOWER(title) = ?", [strtolower($searchQuery)]);
+        if (empty($conditions)) {
+            return $query->whereRaw('1=0'); // No valid query terms
+        }
         
-        // Then find matches where search terms appear at the beginning of words
-        $wordBeginningMatches = clone $query;
-        $wordBeginningMatches = $wordBeginningMatches->newQuery()
-            ->select($columns)
-            ->whereRaw("LOWER(title) <> ?", [strtolower($searchQuery)]) // Exclude exact matches
-            ->where(function($q) use ($preparedQuery, $searchQuery, $words) {
-                // Title starts with search query
-                $q->whereRaw("LOWER(title) LIKE ?", [strtolower($searchQuery) . '%']);
-                
-                // Words in title start with search query (word boundary)
-                $q->orWhereRaw("LOWER(title) ~ ?", ['\\m' . strtolower(preg_quote($searchQuery))]);
-                
-                // For multi-word searches, match all words at word boundaries
-                if (count($words) > 1) {
-                    $wordBoundaryClause = "";
-                    $wordBoundaryParams = [];
-                    
-                    foreach ($words as $word) {
-                        $wordBoundaryClause .= (strlen($wordBoundaryClause) > 0 ? " AND " : "");
-                        $wordBoundaryClause .= "LOWER(title) ~ ?";
-                        $wordBoundaryParams[] = '\\m' . strtolower(preg_quote($word));
-                    }
-                    
-                    if (!empty($wordBoundaryClause)) {
-                        $q->orWhereRaw("($wordBoundaryClause)", $wordBoundaryParams);
-                    }
+        // Start building the query with OR conditions
+        $query->where(function($q) use ($conditions, $preparedQuery, $searchQuery, $words) {
+            // Add full-text search for title (most comprehensive, but lower priority)
+            $q->whereRaw("to_tsvector('english', title) @@ to_tsquery('english', ?)", [$preparedQuery]);
+            
+            // Add each word beginning condition
+            foreach ($conditions as $condition) {
+                if (is_array($condition[1])) {
+                    // Multi-parameter condition
+                    $q->orWhereRaw($condition[0], $condition[1]);
+                } else {
+                    // Single parameter condition
+                    $q->orWhereRaw($condition[0], [$condition[1]]);
                 }
-                
-                // Full-text search using tsquery with word beginnings
-                $q->orWhereRaw("search_vector @@ to_tsquery('english', ?)", [$preparedQuery]);
-            })
-            ->orderByRaw("
-                CASE 
-                    WHEN LOWER(title) LIKE ? THEN 1  -- Title starts with query
-                    WHEN LOWER(title) ~ ? THEN 2  -- Title has word starting with query
-                    WHEN " . (count($words) > 1 ? $this->buildWordBeginningCondition('title', $words) : "FALSE") . " THEN 3  -- Title has all words at word boundaries
-                    ELSE 4
-                END,
-                ts_rank(search_vector, to_tsquery('english', ?), 1) DESC
-            ", [
-                strtolower($searchQuery) . '%',
-                '\\m' . strtolower(preg_quote($searchQuery)),
-                $preparedQuery
-            ]);
-        
-        // Combine exact and word beginning matches using UNION ALL with proper SQL building
-        $exactSql = $exactMatches->toSql();
-        $wordBeginningsSql = $wordBeginningMatches->toSql();
-        $bindings = array_merge($exactMatches->getBindings(), $wordBeginningMatches->getBindings());
-        
-        // Apply the SQL to our original query
-        return $query->fromRaw("(($exactSql) UNION ALL ($wordBeginningsSql)) as books_search", $bindings);
-    }
-
-    private function buildWordBeginningCondition($column, array $words) 
-    {
-        if (empty($words)) {
-            return 'FALSE';
-        }
-        
-        $conditions = [];
-        foreach ($words as $word) {
-            if (!empty($word)) {
-                $conditions[] = "LOWER($column) ~ '\\m" . strtolower(preg_quote($word)) . "'";
             }
-        }
-        return !empty($conditions) ? '(' . implode(' AND ', $conditions) . ')' : 'FALSE';
+        });
+        
+        // Order by a combination of match quality and full-text search ranking
+        return $query->orderByRaw("
+            CASE 
+                WHEN LOWER(title) = ? THEN 1  -- Exact match
+                WHEN LOWER(title) LIKE ? THEN 2  -- Starts with
+                WHEN LOWER(title) ~ ? THEN 3  -- Word boundary match
+                WHEN " . (count($words) > 1 ? $this->buildWordBeginningCondition('title', $words) : "FALSE") . " THEN 4  -- Contains all words at boundaries
+                ELSE 5
+            END,
+            -- Enhanced ranking with ts_rank_cd for cover density (proximity of terms)
+            -- and normalization factor 8 (divide by the number of unique words)
+            ts_rank_cd(to_tsvector('english', title), to_tsquery('english', ?), 8) DESC
+        ", [
+            strtolower($searchQuery), 
+            strtolower($searchQuery) . '%',
+            '\\m' . strtolower(preg_quote($searchQuery)),
+            $preparedQuery
+        ]);
     }
 
     /**
-     * Scope a query to include books that match the search query by author.
+     * Scope a query to include books that match the search query by author name.
      * Only matches the beginning of words in author names.
      *
      * @param  Builder  $query
@@ -306,10 +270,8 @@ class Book extends Model
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
         // Create an array of words from the query for word-by-word matching
-        $stopWords = ['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'as'];
-        $searchTerms = $searchQuery; // Store the original search query for later use
-        $words = array_filter(explode(' ', $searchTerms), function($word) use ($stopWords, $searchTerms) {
-            return strlen($word) > 1 && (!in_array(strtolower($word), $stopWords) || count(explode(' ', $searchTerms)) <= 2);
+        $words = array_filter(explode(' ', $searchQuery), function($word) {
+            return strlen($word) > 1;
         });
         
         return $query->whereHas('authors', function($q) use ($preparedQuery, $searchQuery, $words) {
@@ -350,12 +312,40 @@ class Book extends Model
                 WHEN " . (count($words) > 1 ? "EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
                             WHERE ba.book_id = books.id AND " . $this->buildWordBeginningRawCondition('a.name', $words) . ")" : "FALSE") . " THEN 4  -- Contains all words at boundaries
                 ELSE 5
-            END
+            END,
+            -- Advanced ranking: Using combined ts_rank (with normalization factor 2 - divide by the sum of all lexemes) 
+            -- and ts_rank_cd (with normalization factor 16 - divide by 1 + logarithm of the document length)
+            (
+                SELECT 0.6 * ts_rank(to_tsvector('english', a.name), to_tsquery('english', ?), 2) + 
+                       0.4 * ts_rank_cd(to_tsvector('english', a.name), to_tsquery('english', ?), 16)
+                FROM book_authors ba 
+                JOIN authors a ON ba.author_id = a.id 
+                WHERE ba.book_id = books.id
+                ORDER BY 1 DESC
+                LIMIT 1
+            ) DESC
         ", [
             strtolower($searchQuery), 
             strtolower($searchQuery) . '%',
-            '\\m' . strtolower(preg_quote($searchQuery))
+            '\\m' . strtolower(preg_quote($searchQuery)),
+            $preparedQuery,
+            $preparedQuery
         ]);
+    }
+
+    private function buildWordBeginningCondition($column, array $words) 
+    {
+        if (empty($words)) {
+            return 'FALSE';
+        }
+        
+        $conditions = [];
+        foreach ($words as $word) {
+            if (!empty($word)) {
+                $conditions[] = "LOWER($column) ~ '\\m" . strtolower(preg_quote($word)) . "'";
+            }
+        }
+        return !empty($conditions) ? '(' . implode(' AND ', $conditions) . ')' : 'FALSE';
     }
 
     private function buildWordBeginningRawCondition($column, array $words)
@@ -562,13 +552,17 @@ class Book extends Model
                                 WHERE ba.book_id = books.id AND " . $this->buildWordBeginningRawCondition('a.name', $words) . ")" : "FALSE") . " THEN 7  -- Author has all words at word boundaries
                     ELSE 8
                 END,
-                ts_rank(search_vector, to_tsquery('english', ?), 1) * 1.0 DESC
+                -- Enhanced ranking: Using ts_rank with normalization factor 4 (divide by document length)
+                -- and ts_rank_cd to consider cover density (proximity of search terms)
+                (ts_rank(search_vector, to_tsquery('english', ?), 4) + 
+                 ts_rank_cd(search_vector, to_tsquery('english', ?), 32)) DESC
             ", [
                 strtolower($searchQuery) . '%',
                 '\\m' . strtolower(preg_quote($searchQuery)),
                 strtolower($searchQuery) . '%',
                 '\\m' . strtolower(preg_quote($searchQuery)),
                 $searchQuery . '%',
+                $preparedQuery,
                 $preparedQuery
             ]);
         
