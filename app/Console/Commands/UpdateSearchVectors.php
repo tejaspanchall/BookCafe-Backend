@@ -29,42 +29,36 @@ class UpdateSearchVectors extends Command
     {
         $this->info('Updating search vectors for all books...');
 
-        // First update books with title and ISBN only
+        // Update books with title, ISBN, and author names with proper weights
         DB::statement('
-            UPDATE books 
-            SET search_vector = to_tsvector(\'english\', 
-                COALESCE(title, \'\') || \' \' || 
-                COALESCE(isbn, \'\')
+            UPDATE books b
+            SET search_vector = (
+                SELECT 
+                    setweight(to_tsvector(\'english\', COALESCE(b.title, \'\')), \'A\') ||
+                    setweight(to_tsvector(\'english\', COALESCE(b.isbn, \'\')), \'B\') ||
+                    setweight(to_tsvector(\'english\', COALESCE(string_agg(a.name, \' \'), \'\')), \'C\')
+                FROM book_authors ba
+                JOIN authors a ON a.id = ba.author_id
+                WHERE ba.book_id = b.id
+                GROUP BY b.id
+            )
+            WHERE EXISTS (
+                SELECT 1 FROM book_authors ba WHERE ba.book_id = b.id
             )
         ');
 
-        // Get all books with their authors to update the search vectors with author names
-        $books = Book::with('authors')->get();
-        
-        $counter = 0;
-        $total = count($books);
-        
-        $this->output->progressStart($total);
-        
-        foreach ($books as $book) {
-            // Get author names as a string
-            $authorNames = $book->authors->pluck('name')->implode(' ');
-            
-            if (!empty($authorNames)) {
-                // Update search vector to include author names
-                DB::statement("
-                    UPDATE books 
-                    SET search_vector = search_vector || to_tsvector('english', ?)
-                    WHERE id = ?
-                ", [$authorNames, $book->id]);
-            }
-            
-            $counter++;
-            $this->output->progressAdvance();
-        }
-        
-        $this->output->progressFinish();
-        
-        $this->info('Search vectors updated successfully for ' . $counter . ' books!');
+        // Update books without authors (only title and ISBN)
+        DB::statement('
+            UPDATE books b
+            SET search_vector = 
+                setweight(to_tsvector(\'english\', COALESCE(b.title, \'\')), \'A\') ||
+                setweight(to_tsvector(\'english\', COALESCE(b.isbn, \'\')), \'B\')
+            WHERE NOT EXISTS (
+                SELECT 1 FROM book_authors ba WHERE ba.book_id = b.id
+            )
+        ');
+
+        $this->info('Search vectors updated successfully!');
+        $this->info('Books with updated vectors: ' . DB::table('books')->count());
     }
 } 

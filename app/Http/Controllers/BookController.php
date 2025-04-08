@@ -452,33 +452,222 @@ class BookController extends Controller
             // Fallback to basic search if full-text search fails
             $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
             $lowercaseQuery = strtolower($query);
+            $words = array_filter(explode(' ', $lowercaseQuery), function($word) {
+                return strlen($word) > 2;
+            });
             
             // Apply different search criteria based on type
             switch($type) {
                 case 'author':
-                    $bookQuery->whereHas('authors', function($q) use ($lowercaseQuery) {
-                        $q->whereRaw('LOWER(name) LIKE ?', [$lowercaseQuery . '%']);
-                    });
+                    $bookQuery->whereHas('authors', function($q) use ($lowercaseQuery, $words) {
+                        $q->where(function($subQ) use ($lowercaseQuery, $words) {
+                            // Exact match
+                            $subQ->whereRaw('LOWER(name) = ?', [$lowercaseQuery]);
+                            // Starts with
+                            $subQ->orWhereRaw('LOWER(name) LIKE ?', [$lowercaseQuery . '%']);
+                            // Contains
+                            $subQ->orWhereRaw('LOWER(name) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                            
+                            // Match each word for multi-word queries
+                            if (count($words) > 1) {
+                                // Add condition to match all words
+                                $whereClause = "";
+                                $params = [];
+                                
+                                foreach ($words as $word) {
+                                    if (strlen($word) > 2) {
+                                        $whereClause .= (strlen($whereClause) > 0 ? " AND " : "");
+                                        $whereClause .= "LOWER(name) LIKE ?";
+                                        $params[] = '%' . $word . '%';
+                                    }
+                                }
+                                
+                                if (!empty($whereClause)) {
+                                    $subQ->orWhereRaw("($whereClause)", $params);
+                                }
+                                
+                                // Also match individual words
+                                foreach ($words as $word) {
+                                    if (strlen($word) > 2) {
+                                        $subQ->orWhereRaw('LOWER(name) LIKE ?', ['%' . $word . '%']);
+                                    }
+                                }
+                            }
+                        });
+                    })->orderByRaw("
+                        CASE 
+                            WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                        WHERE ba.book_id = books.id AND LOWER(a.name) = ?) THEN 1
+                            WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                        WHERE ba.book_id = books.id AND LOWER(a.name) LIKE ?) THEN 2
+                            WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                        WHERE ba.book_id = books.id AND LOWER(a.name) LIKE ?) THEN 3
+                            ELSE 4
+                        END
+                    ", [$lowercaseQuery, $lowercaseQuery . '%', '%' . $lowercaseQuery . '%']);
                     break;
+                    
                 case 'isbn':
-                    $bookQuery->whereRaw('LOWER(isbn) LIKE ?', [$lowercaseQuery . '%']);
+                    $bookQuery->where(function($q) use ($lowercaseQuery) {
+                        // Exact match
+                        $q->whereRaw('LOWER(isbn) = ?', [$lowercaseQuery]);
+                        // Starts with
+                        $q->orWhereRaw('LOWER(isbn) LIKE ?', [$lowercaseQuery . '%']);
+                        // Contains
+                        $q->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                        
+                        // Try without dashes if the query has them
+                        if (str_contains($lowercaseQuery, '-')) {
+                            $plainIsbn = str_replace('-', '', $lowercaseQuery);
+                            $q->orWhereRaw('LOWER(isbn) = ?', [$plainIsbn]);
+                            $q->orWhereRaw('LOWER(isbn) LIKE ?', [$plainIsbn . '%']);
+                            $q->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $plainIsbn . '%']);
+                        }
+                    })->orderByRaw("
+                        CASE 
+                            WHEN LOWER(isbn) = ? THEN 1
+                            WHEN LOWER(isbn) LIKE ? THEN 2
+                            WHEN LOWER(isbn) LIKE ? THEN 3
+                            ELSE 4
+                        END
+                    ", [$lowercaseQuery, $lowercaseQuery . '%', '%' . $lowercaseQuery . '%']);
                     break;
+                    
                 case 'name':
-                    $bookQuery->whereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . '%']);
+                    $bookQuery->where(function($q) use ($lowercaseQuery, $words) {
+                        // Exact match
+                        $q->whereRaw('LOWER(title) = ?', [$lowercaseQuery]);
+                        // Starts with
+                        $q->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . '%']);
+                        // Contains
+                        $q->orWhereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                        
+                        // Match each word for multi-word queries
+                        if (count($words) > 1) {
+                            // Add condition to match all words
+                            $whereClause = "";
+                            $params = [];
+                            
+                            foreach ($words as $word) {
+                                if (strlen($word) > 2) {
+                                    $whereClause .= (strlen($whereClause) > 0 ? " AND " : "");
+                                    $whereClause .= "LOWER(title) LIKE ?";
+                                    $params[] = '%' . $word . '%';
+                                }
+                            }
+                            
+                            if (!empty($whereClause)) {
+                                $q->orWhereRaw("($whereClause)", $params);
+                            }
+                            
+                            // Also match individual words
+                            foreach ($words as $word) {
+                                if (strlen($word) > 2) {
+                                    $q->orWhereRaw('LOWER(title) LIKE ?', ['%' . $word . '%']);
+                                }
+                            }
+                        }
+                    })->orderByRaw("
+                        CASE 
+                            WHEN LOWER(title) = ? THEN 1
+                            WHEN LOWER(title) LIKE ? THEN 2
+                            WHEN LOWER(title) LIKE ? THEN 3
+                            ELSE 4
+                        END
+                    ", [$lowercaseQuery, $lowercaseQuery . '%', '%' . $lowercaseQuery . '%']);
                     break;
+                    
                 case 'all':
                 default:
-                    $bookQuery->where(function($q) use ($lowercaseQuery) {
-                        // Search by title
-                        $q->whereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . '%'])
-                          // Search by ISBN
-                          ->orWhereRaw('LOWER(isbn) LIKE ?', [$lowercaseQuery . '%']);
+                    $bookQuery->where(function($q) use ($lowercaseQuery, $words) {
+                        // Title exact match
+                        $q->whereRaw('LOWER(title) = ?', [$lowercaseQuery]);
+                        // Title starts with
+                        $q->orWhereRaw('LOWER(title) LIKE ?', [$lowercaseQuery . '%']);
+                        // Title contains
+                        $q->orWhereRaw('LOWER(title) LIKE ?', ['%' . $lowercaseQuery . '%']);
                         
-                        // Search by author name
+                        // ISBN match
+                        $q->orWhereRaw('LOWER(isbn) = ?', [$lowercaseQuery]);
+                        $q->orWhereRaw('LOWER(isbn) LIKE ?', [$lowercaseQuery . '%']);
+                        $q->orWhereRaw('LOWER(isbn) LIKE ?', ['%' . $lowercaseQuery . '%']);
+                        
+                        // Author match
                         $q->orWhereHas('authors', function($authorQuery) use ($lowercaseQuery) {
-                            $authorQuery->whereRaw('LOWER(name) LIKE ?', [$lowercaseQuery . '%']);
+                            $authorQuery->whereRaw('LOWER(name) = ?', [$lowercaseQuery]);
+                            $authorQuery->orWhereRaw('LOWER(name) LIKE ?', [$lowercaseQuery . '%']);
+                            $authorQuery->orWhereRaw('LOWER(name) LIKE ?', ['%' . $lowercaseQuery . '%']);
                         });
-                    });
+                        
+                        // Match all words in multi-word queries
+                        if (count($words) > 1) {
+                            // Title contains all words
+                            $titleWhereClause = "";
+                            $titleParams = [];
+                            
+                            foreach ($words as $word) {
+                                if (strlen($word) > 2) {
+                                    $titleWhereClause .= (strlen($titleWhereClause) > 0 ? " AND " : "");
+                                    $titleWhereClause .= "LOWER(title) LIKE ?";
+                                    $titleParams[] = '%' . $word . '%';
+                                }
+                            }
+                            
+                            if (!empty($titleWhereClause)) {
+                                $q->orWhereRaw("($titleWhereClause)", $titleParams);
+                            }
+                            
+                            // Match each word individually in title
+                            foreach ($words as $word) {
+                                if (strlen($word) > 2) {
+                                    $q->orWhereRaw('LOWER(title) LIKE ?', ['%' . $word . '%']);
+                                }
+                            }
+                            
+                            // Author contains all words
+                            $q->orWhereHas('authors', function($authorQuery) use ($words) {
+                                $authorQuery->where(function($subQ) use ($words) {
+                                    $nameWhereClause = "";
+                                    $nameParams = [];
+                                    
+                                    foreach ($words as $word) {
+                                        if (strlen($word) > 2) {
+                                            $nameWhereClause .= (strlen($nameWhereClause) > 0 ? " AND " : "");
+                                            $nameWhereClause .= "LOWER(name) LIKE ?";
+                                            $nameParams[] = '%' . $word . '%';
+                                        }
+                                    }
+                                    
+                                    if (!empty($nameWhereClause)) {
+                                        $subQ->whereRaw("($nameWhereClause)", $nameParams);
+                                    }
+                                    
+                                    // Match each word individually in author name
+                                    foreach ($words as $word) {
+                                        if (strlen($word) > 2) {
+                                            $subQ->orWhereRaw('LOWER(name) LIKE ?', ['%' . $word . '%']);
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    })->orderByRaw("
+                        CASE 
+                            WHEN LOWER(title) = ? THEN 1
+                            WHEN LOWER(title) LIKE ? THEN 2
+                            WHEN LOWER(title) LIKE ? THEN 3
+                            WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                        WHERE ba.book_id = books.id AND LOWER(a.name) = ?) THEN 4
+                            WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                        WHERE ba.book_id = books.id AND LOWER(a.name) LIKE ?) THEN 5
+                            WHEN isbn = ? THEN 6
+                            ELSE 7
+                        END
+                    ", [
+                        $lowercaseQuery, $lowercaseQuery . '%', '%' . $lowercaseQuery . '%',
+                        $lowercaseQuery, $lowercaseQuery . '%',
+                        $lowercaseQuery
+                    ]);
                     break;
             }
             

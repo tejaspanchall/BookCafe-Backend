@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 class Book extends Model
 {
@@ -85,56 +86,56 @@ class Book extends Model
 
     /**
      * Prepare the search query for PostgreSQL full-text search.
-     * This approach uses consistent prefix matching with :* suffix for to_tsquery
-     * and proper tokenization for multi-word searches.
+     * This approach uses word beginning matching only.
      *
      * @param  string  $searchQuery
      * @return string
      */
     private function prepareSearchQuery(string $searchQuery): string
     {
-        // Clean input and remove special characters
-        $searchQuery = preg_replace('/[^\p{L}\p{N}_]+/u', ' ', $searchQuery);
+        // Clean input and remove special characters while preserving spaces
+        $searchQuery = preg_replace('/[^\p{L}\p{N}\s]+/u', ' ', $searchQuery);
         $searchQuery = trim($searchQuery);
         
         // If the search query is empty, return empty string
         if (empty($searchQuery)) {
             return '';
         }
+
+        // Get stop words that should be ignored when alone but kept in phrases
+        $stopWords = ['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'as'];
         
-        // Split into terms
-        $terms = array_filter(explode(' ', $searchQuery));
-        
-        if (empty($terms)) {
-            return '';
-        }
-        
-        // Format each term for prefix matching
-        $formattedTerms = [];
-        foreach ($terms as $term) {
-            // Escape any special characters in the term
-            $term = preg_replace('/[&|!:*()"]/', ' ', $term);
-            $term = trim($term);
+        // For multi-word queries, match the beginning of each word
+        if (str_word_count($searchQuery) > 1) {
+            // Simple word-by-word with AND between them
+            $terms = explode(' ', $searchQuery);
+            $formattedTerms = [];
             
-            if (!empty($term)) {
-                // Always add the :* operator for prefix matching
-                $formattedTerms[] = $term . ':*';
+            foreach ($terms as $term) {
+                $term = trim($term);
+                if (!empty($term) && (!in_array($term, $stopWords) || str_word_count($searchQuery) <= 2)) {
+                    // Use :* operator to match at the beginning of words
+                    $formattedTerms[] = "$term:*";
+                }
             }
+            
+            // Join all terms with AND operator for precision
+            return implode(' & ', $formattedTerms);
         }
         
-        // Join with & operator for AND logic between terms
-        return implode(' & ', $formattedTerms);
+        // Single word query - simple prefix matching
+        return "$searchQuery:*";
     }
 
     /**
-     * Get the ILIKE conditions for fuzzy matching.
-     * This complements the full-text search with more flexible matching.
+     * Get the word beginning matching conditions.
+     * This only matches the beginning of words, not anywhere in the text.
      *
      * @param  string  $searchQuery
      * @param  string  $column
      * @return array
      */
-    private function getIlikeConditions(string $searchQuery, string $column): array
+    private function getWordBeginningConditions(string $searchQuery, string $column): array
     {
         // Clean and trim search query
         $searchQuery = trim($searchQuery);
@@ -151,16 +152,28 @@ class Book extends Model
         // Starts with (high priority)
         $conditions[] = ["LOWER($column) LIKE ?", strtolower($searchQuery) . '%'];
         
-        // Contains (medium priority)
-        $conditions[] = ["LOWER($column) LIKE ?", '%' . strtolower($searchQuery) . '%'];
+        // Word boundary starts with (medium-high priority)
+        $conditions[] = ["LOWER($column) ~ ?", '\\m' . strtolower(preg_quote($searchQuery))];
         
-        // If we have multiple words, create conditions for individual words
+        // If we have multiple words, create conditions for individual words at word beginnings
         $words = array_filter(explode(' ', $searchQuery));
         if (count($words) > 1) {
+            // Add condition for matching all words at word boundaries
+            $allWordsCondition = "";
+            $allWordsParams = [];
+            
             foreach ($words as $word) {
-                if (strlen($word) > 2) { // Only consider words longer than 2 chars
-                    $conditions[] = ["LOWER($column) LIKE ?", '%' . strtolower($word) . '%'];
+                if (strlen($word) > 1) { // Consider words of at least 2 chars
+                    if (strlen($allWordsCondition) > 0) {
+                        $allWordsCondition .= " AND ";
+                    }
+                    $allWordsCondition .= "LOWER($column) ~ ?";
+                    $allWordsParams[] = '\\m' . strtolower(preg_quote($word));
                 }
+            }
+            
+            if (!empty($allWordsCondition)) {
+                $conditions[] = ["($allWordsCondition)", $allWordsParams];
             }
         }
         
@@ -168,45 +181,8 @@ class Book extends Model
     }
 
     /**
-     * Scope a query to only include books that match the search query across title and description.
-     *
-     * @param  Builder  $query
-     * @param  string  $searchQuery
-     * @return Builder
-     */
-    public function scopeSearch(Builder $query, string $searchQuery)
-    {
-        $searchQuery = trim($searchQuery);
-        
-        if (empty($searchQuery)) {
-            return $query->whereRaw('1=0'); // Empty result if query is empty
-        }
-        
-        // Prepare query for full-text search
-        $preparedQuery = $this->prepareSearchQuery($searchQuery);
-        
-        return $query->where(function($q) use ($preparedQuery, $searchQuery) {
-            // First try full-text search
-            $q->whereRaw("search_vector @@ to_tsquery('english', ?)", [$preparedQuery]);
-            
-            // Then add ILIKE conditions for better fuzzy matching
-            $ilikeConditions = $this->getIlikeConditions($searchQuery, 'title');
-            foreach ($ilikeConditions as [$condition, $value]) {
-                $q->orWhereRaw($condition, [$value]);
-            }
-        })->orderByRaw("
-            ts_rank(search_vector, to_tsquery('english', ?)) DESC,
-            CASE 
-                WHEN LOWER(title) = ? THEN 1
-                WHEN LOWER(title) LIKE ? THEN 2
-                WHEN LOWER(title) LIKE ? THEN 3
-                ELSE 4
-            END
-        ", [$preparedQuery, strtolower($searchQuery), strtolower($searchQuery) . '%', '%' . strtolower($searchQuery) . '%']);
-    }
-
-    /**
      * Scope a query to include books that match the search query by title.
+     * Only matches the beginning of words in titles.
      *
      * @param  Builder  $query
      * @param  string  $searchQuery
@@ -224,30 +200,94 @@ class Book extends Model
         // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
-        return $query->where(function($q) use ($preparedQuery, $searchQuery) {
-            // Full-text search on title
-            $q->whereRaw("to_tsvector('english', COALESCE(title, '')) @@ to_tsquery('english', ?)", [
+        // Create an array of words from the query for word-by-word matching
+        $stopWords = ['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'as'];
+        $searchTerms = $searchQuery; // Store the original search query for later use
+        $words = array_filter(explode(' ', $searchTerms), function($word) use ($stopWords, $searchTerms) {
+            return strlen($word) > 1 && (!in_array(strtolower($word), $stopWords) || count(explode(' ', $searchTerms)) <= 2);
+        });
+        
+        // Get the query columns, or default to '*'
+        $columns = $query->getQuery()->columns ?? ['*'];
+        
+        // First find exact title matches
+        $exactMatches = clone $query;
+        $exactMatches = $exactMatches->newQuery()
+            ->select($columns)
+            ->whereRaw("LOWER(title) = ?", [strtolower($searchQuery)]);
+        
+        // Then find matches where search terms appear at the beginning of words
+        $wordBeginningMatches = clone $query;
+        $wordBeginningMatches = $wordBeginningMatches->newQuery()
+            ->select($columns)
+            ->whereRaw("LOWER(title) <> ?", [strtolower($searchQuery)]) // Exclude exact matches
+            ->where(function($q) use ($preparedQuery, $searchQuery, $words) {
+                // Title starts with search query
+                $q->whereRaw("LOWER(title) LIKE ?", [strtolower($searchQuery) . '%']);
+                
+                // Words in title start with search query (word boundary)
+                $q->orWhereRaw("LOWER(title) ~ ?", ['\\m' . strtolower(preg_quote($searchQuery))]);
+                
+                // For multi-word searches, match all words at word boundaries
+                if (count($words) > 1) {
+                    $wordBoundaryClause = "";
+                    $wordBoundaryParams = [];
+                    
+                    foreach ($words as $word) {
+                        $wordBoundaryClause .= (strlen($wordBoundaryClause) > 0 ? " AND " : "");
+                        $wordBoundaryClause .= "LOWER(title) ~ ?";
+                        $wordBoundaryParams[] = '\\m' . strtolower(preg_quote($word));
+                    }
+                    
+                    if (!empty($wordBoundaryClause)) {
+                        $q->orWhereRaw("($wordBoundaryClause)", $wordBoundaryParams);
+                    }
+                }
+                
+                // Full-text search using tsquery with word beginnings
+                $q->orWhereRaw("search_vector @@ to_tsquery('english', ?)", [$preparedQuery]);
+            })
+            ->orderByRaw("
+                CASE 
+                    WHEN LOWER(title) LIKE ? THEN 1  -- Title starts with query
+                    WHEN LOWER(title) ~ ? THEN 2  -- Title has word starting with query
+                    WHEN " . (count($words) > 1 ? $this->buildWordBeginningCondition('title', $words) : "FALSE") . " THEN 3  -- Title has all words at word boundaries
+                    ELSE 4
+                END,
+                ts_rank(search_vector, to_tsquery('english', ?), 1) DESC
+            ", [
+                strtolower($searchQuery) . '%',
+                '\\m' . strtolower(preg_quote($searchQuery)),
                 $preparedQuery
             ]);
-            
-            // Add ILIKE conditions for better fuzzy matching
-            $ilikeConditions = $this->getIlikeConditions($searchQuery, 'title');
-            foreach ($ilikeConditions as [$condition, $value]) {
-                $q->orWhereRaw($condition, [$value]);
+        
+        // Combine exact and word beginning matches using UNION ALL with proper SQL building
+        $exactSql = $exactMatches->toSql();
+        $wordBeginningsSql = $wordBeginningMatches->toSql();
+        $bindings = array_merge($exactMatches->getBindings(), $wordBeginningMatches->getBindings());
+        
+        // Apply the SQL to our original query
+        return $query->fromRaw("(($exactSql) UNION ALL ($wordBeginningsSql)) as books_search", $bindings);
+    }
+
+    private function buildWordBeginningCondition($column, array $words) 
+    {
+        if (empty($words)) {
+            return 'FALSE';
+        }
+        
+        $conditions = [];
+        foreach ($words as $word) {
+            if (!empty($word)) {
+                $conditions[] = "LOWER($column) ~ '\\m" . strtolower(preg_quote($word)) . "'";
             }
-        })->orderByRaw("
-            ts_rank(to_tsvector('english', COALESCE(title, '')), to_tsquery('english', ?)) DESC,
-            CASE 
-                WHEN LOWER(title) = ? THEN 1
-                WHEN LOWER(title) LIKE ? THEN 2
-                WHEN LOWER(title) LIKE ? THEN 3
-                ELSE 4
-            END
-        ", [$preparedQuery, strtolower($searchQuery), strtolower($searchQuery) . '%', '%' . strtolower($searchQuery) . '%']);
+        }
+        return !empty($conditions) ? '(' . implode(' AND ', $conditions) . ')' : 'FALSE';
     }
 
     /**
      * Scope a query to include books that match the search query by author.
+     * Only matches the beginning of words in author names.
      *
      * @param  Builder  $query
      * @param  string  $searchQuery
@@ -265,18 +305,72 @@ class Book extends Model
         // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
-        return $query->whereHas('authors', function($q) use ($preparedQuery, $searchQuery) {
-            // Full-text search on author name
-            $q->whereRaw("to_tsvector('english', name) @@ to_tsquery('english', ?)", [
-                $preparedQuery
-            ]);
-            
-            // Add ILIKE conditions for better fuzzy matching
-            $ilikeConditions = $this->getIlikeConditions($searchQuery, 'name');
-            foreach ($ilikeConditions as [$condition, $value]) {
-                $q->orWhereRaw($condition, [$value]);
-            }
+        // Create an array of words from the query for word-by-word matching
+        $stopWords = ['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'as'];
+        $searchTerms = $searchQuery; // Store the original search query for later use
+        $words = array_filter(explode(' ', $searchTerms), function($word) use ($stopWords, $searchTerms) {
+            return strlen($word) > 1 && (!in_array(strtolower($word), $stopWords) || count(explode(' ', $searchTerms)) <= 2);
         });
+        
+        return $query->whereHas('authors', function($q) use ($preparedQuery, $searchQuery, $words) {
+            // Full-text search on author name
+            $q->whereRaw("to_tsvector('english', name) @@ to_tsquery('english', ?)", [$preparedQuery]);
+            
+            // Author name starts with query
+            $q->orWhereRaw("LOWER(name) LIKE ?", [strtolower($searchQuery) . '%']);
+            
+            // Word in author name starts with query (word boundary)
+            $q->orWhereRaw("LOWER(name) ~ ?", ['\\m' . strtolower(preg_quote($searchQuery))]);
+            
+            // For multi-word searches, match all words at word boundaries
+            if (count($words) > 1) {
+                // Match all words at word boundaries
+                $boundaryClause = "";
+                $boundaryParams = [];
+                
+                foreach ($words as $word) {
+                    $boundaryClause .= (strlen($boundaryClause) > 0 ? " AND " : "");
+                    $boundaryClause .= "LOWER(name) ~ ?";
+                    $boundaryParams[] = '\\m' . strtolower(preg_quote($word));
+                }
+                
+                if (!empty($boundaryClause)) {
+                    $q->orWhereRaw("($boundaryClause)", $boundaryParams);
+                }
+            }
+        })->orderByRaw("
+            -- Order based on author name match quality
+            CASE 
+                WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                            WHERE ba.book_id = books.id AND LOWER(a.name) = ?) THEN 1  -- Exact match
+                WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                            WHERE ba.book_id = books.id AND LOWER(a.name) LIKE ?) THEN 2  -- Starts with
+                WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                            WHERE ba.book_id = books.id AND LOWER(a.name) ~ ?) THEN 3  -- Word boundary match
+                WHEN " . (count($words) > 1 ? "EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                            WHERE ba.book_id = books.id AND " . $this->buildWordBeginningRawCondition('a.name', $words) . ")" : "FALSE") . " THEN 4  -- Contains all words at boundaries
+                ELSE 5
+            END
+        ", [
+            strtolower($searchQuery), 
+            strtolower($searchQuery) . '%',
+            '\\m' . strtolower(preg_quote($searchQuery))
+        ]);
+    }
+
+    private function buildWordBeginningRawCondition($column, array $words)
+    {
+        if (empty($words)) {
+            return 'FALSE';
+        }
+        
+        $conditions = [];
+        foreach ($words as $word) {
+            if (!empty($word)) {
+                $conditions[] = "LOWER($column) ~ '\\m" . strtolower(preg_quote($word)) . "'";
+            }
+        }
+        return !empty($conditions) ? '(' . implode(' AND ', $conditions) . ')' : 'FALSE';
     }
 
     /**
@@ -325,7 +419,7 @@ class Book extends Model
 
     /**
      * Scope a query to include books that match the search query across all fields.
-     * Only includes title, author, and ISBN fields (excludes description).
+     * Only matches the beginning of words in titles, author names, and ISBN.
      *
      * @param  Builder  $query
      * @param  string  $searchQuery
@@ -343,56 +437,147 @@ class Book extends Model
         // Prepare query for full-text search
         $preparedQuery = $this->prepareSearchQuery($searchQuery);
         
-        return $query->where(function($q) use ($preparedQuery, $searchQuery) {
-            // FULL TEXT SEARCH
-            
-            // Search by title with full-text
-            $q->whereRaw("to_tsvector('english', COALESCE(title, '')) @@ to_tsquery('english', ?)", [
-                $preparedQuery
-            ]);
-            
-            // Search by ISBN with full-text
-            $q->orWhereRaw("to_tsvector('english', COALESCE(isbn, '')) @@ to_tsquery('english', ?)", [
-                $preparedQuery
-            ]);
-            
-            // Search by author name with full-text
-            $q->orWhereHas('authors', function($authorQuery) use ($preparedQuery) {
-                $authorQuery->whereRaw("to_tsvector('english', name) @@ to_tsquery('english', ?)", [
-                    $preparedQuery
-                ]);
-            });
-            
-            // FUZZY MATCHING WITH ILIKE
-            
-            // Title ILIKE conditions
-            $titleConditions = $this->getIlikeConditions($searchQuery, 'title');
-            foreach ($titleConditions as [$condition, $value]) {
-                $q->orWhereRaw($condition, [$value]);
-            }
-            
-            // ISBN ILIKE conditions - simpler since it's more structured
-            $q->orWhereRaw('isbn = ?', [$searchQuery]);
-            $q->orWhereRaw('isbn LIKE ?', [$searchQuery . '%']);
-            
-            // Author ILIKE conditions
-            $q->orWhereHas('authors', function($authorQuery) use ($searchQuery) {
-                $nameConditions = $this->getIlikeConditions($searchQuery, 'name');
-                $authorQuery->where(function($subQ) use ($nameConditions) {
-                    foreach ($nameConditions as [$condition, $value]) {
-                        $subQ->orWhereRaw($condition, [$value]);
-                    }
+        // Create an array of words from the query for word-by-word matching
+        $stopWords = ['the', 'and', 'or', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'as'];
+        $searchTerms = $searchQuery; // Store the original search query for later use
+        $words = array_filter(explode(' ', $searchTerms), function($word) use ($stopWords, $searchTerms) {
+            return strlen($word) > 1 && (!in_array(strtolower($word), $stopWords) || count(explode(' ', $searchTerms)) <= 2);
+        });
+        
+        // Get the query columns, or default to '*'
+        $columns = $query->getQuery()->columns ?? ['*'];
+        
+        // First find exact matches for title, author, or ISBN
+        $exactMatches = clone $query;
+        $exactMatches = $exactMatches->newQuery()
+            ->select($columns)
+            ->where(function($q) use ($searchQuery) {
+                // Exact title match
+                $q->whereRaw("LOWER(title) = ?", [strtolower($searchQuery)]);
+                
+                // Exact author match
+                $q->orWhereHas('authors', function($authorQuery) use ($searchQuery) {
+                    $authorQuery->whereRaw("LOWER(name) = ?", [strtolower($searchQuery)]);
                 });
-            });
-        })->orderByRaw("
-            ts_rank(to_tsvector('english', COALESCE(title, '')), to_tsquery('english', ?)) +
-            ts_rank(to_tsvector('english', COALESCE(isbn, '')), to_tsquery('english', ?)) DESC,
-            CASE 
-                WHEN LOWER(title) = ? THEN 1
-                WHEN LOWER(title) LIKE ? THEN 2
-                WHEN LOWER(title) LIKE ? THEN 3
-                ELSE 4
-            END
-        ", [$preparedQuery, $preparedQuery, strtolower($searchQuery), strtolower($searchQuery) . '%', '%' . strtolower($searchQuery) . '%']);
+                
+                // Exact ISBN match
+                $q->orWhereRaw('isbn = ?', [$searchQuery]);
+            })
+            ->orderByRaw("
+                CASE 
+                    WHEN LOWER(title) = ? THEN 1  -- Exact title match
+                    WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                WHERE ba.book_id = books.id AND LOWER(a.name) = ?) THEN 2  -- Exact author match
+                    WHEN isbn = ? THEN 3  -- Exact ISBN match
+                    ELSE 4
+                END
+            ", [strtolower($searchQuery), strtolower($searchQuery), $searchQuery]);
+            
+        // Then find matches where search terms appear at the beginning of words
+        $wordBeginningMatches = clone $query;
+        $wordBeginningMatches = $wordBeginningMatches->newQuery()
+            ->select($columns)
+            ->where(function($q) use ($searchQuery) {
+                // Exclude exact matches for title, author, and ISBN
+                $q->whereRaw("LOWER(title) <> ?", [strtolower($searchQuery)]);
+                
+                $q->whereNotExists(function($q) use ($searchQuery) {
+                    $q->selectRaw('1')
+                      ->from('book_authors as ba')
+                      ->join('authors as a', 'ba.author_id', '=', 'a.id')
+                      ->whereRaw('ba.book_id = books.id AND LOWER(a.name) = ?', [strtolower($searchQuery)]);
+                });
+                
+                $q->whereRaw('isbn <> ?', [$searchQuery]);
+            })
+            ->where(function($q) use ($preparedQuery, $searchQuery, $words) {
+                // Full-text search
+                $q->whereRaw("search_vector @@ to_tsquery('english', ?)", [$preparedQuery]);
+                
+                // Title starts with search query
+                $q->orWhereRaw("LOWER(title) LIKE ?", [strtolower($searchQuery) . '%']);
+                
+                // Words in title start with search query (word boundary)
+                $q->orWhereRaw("LOWER(title) ~ ?", ['\\m' . strtolower(preg_quote($searchQuery))]);
+                
+                // Author starts with search query
+                $q->orWhereHas('authors', function($authorQuery) use ($searchQuery) {
+                    $authorQuery->whereRaw("LOWER(name) LIKE ?", [strtolower($searchQuery) . '%']);
+                });
+                
+                // Words in author name start with search query (word boundary)
+                $q->orWhereHas('authors', function($authorQuery) use ($searchQuery) {
+                    $authorQuery->whereRaw("LOWER(name) ~ ?", ['\\m' . strtolower(preg_quote($searchQuery))]);
+                });
+                
+                // ISBN starts with search query
+                $q->orWhereRaw("isbn LIKE ?", [$searchQuery . '%']);
+                
+                // For multi-word searches, match all words at word boundaries
+                if (count($words) > 1) {
+                    // Title contains all words at word boundaries
+                    $titleBoundaryClause = "";
+                    $titleBoundaryParams = [];
+                    
+                    foreach ($words as $word) {
+                        $titleBoundaryClause .= (strlen($titleBoundaryClause) > 0 ? " AND " : "");
+                        $titleBoundaryClause .= "LOWER(title) ~ ?";
+                        $titleBoundaryParams[] = '\\m' . strtolower(preg_quote($word));
+                    }
+                    
+                    if (!empty($titleBoundaryClause)) {
+                        $q->orWhereRaw("($titleBoundaryClause)", $titleBoundaryParams);
+                    }
+                    
+                    // Author contains all words at word boundaries
+                    $q->orWhereHas('authors', function($authorQuery) use ($words) {
+                        $authorQuery->where(function($subQ) use ($words) {
+                            $boundaryClause = "";
+                            $boundaryParams = [];
+                            
+                            foreach ($words as $word) {
+                                $boundaryClause .= (strlen($boundaryClause) > 0 ? " AND " : "");
+                                $boundaryClause .= "LOWER(name) ~ ?";
+                                $boundaryParams[] = '\\m' . strtolower(preg_quote($word));
+                            }
+                            
+                            if (!empty($boundaryClause)) {
+                                $subQ->whereRaw("($boundaryClause)", $boundaryParams);
+                            }
+                        });
+                    });
+                }
+            })
+            ->orderByRaw("
+                CASE 
+                    WHEN LOWER(title) LIKE ? THEN 1  -- Title starts with query
+                    WHEN LOWER(title) ~ ? THEN 2  -- Title has word starting with query
+                    WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                WHERE ba.book_id = books.id AND LOWER(a.name) LIKE ?) THEN 3  -- Author starts with
+                    WHEN EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                WHERE ba.book_id = books.id AND LOWER(a.name) ~ ?) THEN 4  -- Author has word starting with query
+                    WHEN isbn LIKE ? THEN 5  -- ISBN starts with
+                    WHEN " . (count($words) > 1 ? $this->buildWordBeginningCondition('title', $words) : "FALSE") . " THEN 6  -- Title has all words at word boundaries
+                    WHEN " . (count($words) > 1 ? "EXISTS (SELECT 1 FROM book_authors ba JOIN authors a ON ba.author_id = a.id 
+                                WHERE ba.book_id = books.id AND " . $this->buildWordBeginningRawCondition('a.name', $words) . ")" : "FALSE") . " THEN 7  -- Author has all words at word boundaries
+                    ELSE 8
+                END,
+                ts_rank(search_vector, to_tsquery('english', ?), 1) * 1.0 DESC
+            ", [
+                strtolower($searchQuery) . '%',
+                '\\m' . strtolower(preg_quote($searchQuery)),
+                strtolower($searchQuery) . '%',
+                '\\m' . strtolower(preg_quote($searchQuery)),
+                $searchQuery . '%',
+                $preparedQuery
+            ]);
+        
+        // Combine exact and word beginning matches using UNION ALL with proper SQL building
+        $exactSql = $exactMatches->toSql();
+        $wordBeginningsSql = $wordBeginningMatches->toSql();
+        $bindings = array_merge($exactMatches->getBindings(), $wordBeginningMatches->getBindings());
+        
+        // Apply the SQL to our original query
+        return $query->fromRaw("(($exactSql) UNION ALL ($wordBeginningsSql)) as books_search", $bindings);
     }
 }

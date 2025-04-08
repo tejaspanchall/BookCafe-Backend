@@ -21,25 +21,49 @@ class AddFullTextSearchToBooks extends Migration
         DB::statement('CREATE INDEX books_search_idx ON books USING GIN(search_vector)');
 
         // Create a trigger to automatically update the search_vector when a book is updated
-        // Include only title and ISBN, excluding description
+        // Include title, ISBN, and author names
+        DB::statement('
+            CREATE OR REPLACE FUNCTION books_search_vector_update() RETURNS trigger AS $$
+            DECLARE
+                author_names text;
+            BEGIN
+                -- Get author names for the book
+                SELECT string_agg(a.name, \' \')
+                INTO author_names
+                FROM book_author ba
+                JOIN authors a ON a.id = ba.author_id
+                WHERE ba.book_id = NEW.id;
+
+                -- Update search vector with title, ISBN, and author names
+                NEW.search_vector := 
+                    setweight(to_tsvector(\'english\', COALESCE(NEW.title, \'\')), \'A\') ||
+                    setweight(to_tsvector(\'english\', COALESCE(NEW.isbn, \'\')), \'B\') ||
+                    setweight(to_tsvector(\'english\', COALESCE(author_names, \'\')), \'C\');
+                
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        ');
+
         DB::statement('
             CREATE TRIGGER books_search_vector_update
             BEFORE INSERT OR UPDATE ON books
             FOR EACH ROW
-            EXECUTE FUNCTION tsvector_update_trigger(
-                search_vector, 
-                \'pg_catalog.english\', 
-                title, 
-                isbn
-            )
+            EXECUTE FUNCTION books_search_vector_update();
         ');
 
-        // Update existing books with only title and ISBN in search vector
+        // Update existing books with title, ISBN, and author names in search vector
         DB::statement('
-            UPDATE books 
-            SET search_vector = to_tsvector(\'english\', 
-                COALESCE(title, \'\') || \' \' || 
-                COALESCE(isbn, \'\')
+            UPDATE books b
+            SET search_vector = (
+                SELECT 
+                    setweight(to_tsvector(\'english\', COALESCE(b.title, \'\')), \'A\') ||
+                    setweight(to_tsvector(\'english\', COALESCE(b.isbn, \'\')), \'B\') ||
+                    setweight(to_tsvector(\'english\', COALESCE(string_agg(a.name, \' \'), \'\')), \'C\')
+                FROM book_author ba
+                JOIN authors a ON a.id = ba.author_id
+                WHERE ba.book_id = b.id
+                GROUP BY b.id
             )
         ');
     }
