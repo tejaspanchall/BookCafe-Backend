@@ -42,6 +42,7 @@ class BookController extends Controller
             $book->isbn = $request->isbn;
             $book->description = $request->description;
             $book->price = $request->price;
+            $book->created_at = now();
 
             if ($request->hasFile('image')) {
                 $image = $request->file('image');
@@ -89,7 +90,9 @@ class BookController extends Controller
     {
         try {
             // Bypass cache and get books directly from the database
-            $books = Book::with(['users', 'categories', 'authors'])->get();
+            $books = Book::with(['users', 'categories', 'authors'])
+                ->orderBy('created_at', 'desc')
+                ->get();
             
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 
@@ -118,7 +121,9 @@ class BookController extends Controller
         }
 
         // Bypass cache and get books directly from the database
-        $books = Book::with(['categories', 'authors'])->get();
+        $books = Book::with(['categories', 'authors'])
+            ->orderBy('created_at', 'desc')
+            ->get();
         
         $booksWithUrls = $books->map(function($book) {
             $book->image_url = $book->image 
@@ -138,7 +143,10 @@ class BookController extends Controller
         try {
             $userId = Auth::id();
             $books = $this->getCachedBookData("books:user:{$userId}:library", self::CACHE_DURATION, function() {
-                return Auth::user()->books()->with(['users', 'categories', 'authors'])->get();
+                return Auth::user()->books()
+                    ->with(['users', 'categories', 'authors'])
+                    ->orderBy('books.created_at', 'desc')
+                    ->get();
             });
             
             $booksWithUrls = $books->map(function($book) {
@@ -154,7 +162,10 @@ class BookController extends Controller
             ]);
         } catch (\Exception $e) {
             \Log::error('Error fetching user library: ' . $e->getMessage());
-            $books = Auth::user()->books()->with(['users', 'categories', 'authors'])->get();
+            $books = Auth::user()->books()
+                ->with(['users', 'categories', 'authors'])
+                ->orderBy('books.created_at', 'desc')
+                ->get();
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 
                     ? url('storage/books/' . urlencode($book->image))
@@ -760,7 +771,9 @@ class BookController extends Controller
         try {
             $this->clearBookCaches();
 
-            $books = Book::with(['users', 'categories', 'authors'])->get();
+            $books = Book::with(['users', 'categories', 'authors'])
+                ->orderBy('created_at', 'desc')
+                ->get();
             Cache::put('books:all', $books, self::CACHE_DURATION);
             Cache::put('books:library', $books, self::CACHE_DURATION);
             
@@ -783,7 +796,10 @@ class BookController extends Controller
         try {
             $user = User::find($userId);
             if ($user) {
-                $books = $user->books()->with(['users', 'categories', 'authors'])->get();
+                $books = $user->books()
+                    ->with(['users', 'categories', 'authors'])
+                    ->orderBy('books.created_at', 'desc')
+                    ->get();
                 Cache::put("books:user:{$userId}:library", $books, self::CACHE_DURATION);
             }
         } catch (\Exception $e) {

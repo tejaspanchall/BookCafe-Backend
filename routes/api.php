@@ -5,6 +5,7 @@ use App\Http\Controllers\Auth\AuthController;
 use App\Http\Controllers\BookController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\AuthorController;
+use App\Http\Controllers\BookImportController;
 
 Route::prefix('books')->group(function () {
     Route::get('/search', [BookController::class, 'search']);
@@ -45,6 +46,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/add', [BookController::class, 'add']);
         Route::put('/{book}', [BookController::class, 'update']);
         Route::delete('/{book}', [BookController::class, 'deleteBook']);
+    });
+    
+    Route::prefix('excel-imports')->group(function () {
+        Route::post('/upload', [BookImportController::class, 'uploadExcel']);
+        Route::get('/files', [BookImportController::class, 'getExcelFiles']);
+        Route::delete('/file/{fileId}', [BookImportController::class, 'deleteExcelFile']);
+        Route::post('/import/{fileId}', [BookImportController::class, 'importBooks']);
+        Route::get('/template', [BookImportController::class, 'downloadTemplate']);
     });
     
     Route::prefix('categories')->group(function () {
