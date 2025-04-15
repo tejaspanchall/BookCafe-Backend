@@ -471,30 +471,111 @@ class BookImportController extends Controller
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
         }
         
-        $templatePath = storage_path('app/templates/book_import_template.xlsx');
-        
-        // Create template if it doesn't exist
-        if (!file_exists($templatePath)) {
-            $templatesDir = storage_path('app/templates');
+        try {
+            // Log request for diagnostics
+            \Log::info('Template download requested by user: ' . Auth::id());
             
-            // Create directory if it doesn't exist
+            $templatePath = storage_path('app/templates/book_import_template.xlsx');
+            \Log::info('Template path: ' . $templatePath);
+            
+            // Always generate a fresh template
+            $templatesDir = storage_path('app/templates');
+            \Log::info('Templates directory: ' . $templatesDir);
+            
+            // Create directory if it doesn't exist with more permissive permissions
             if (!file_exists($templatesDir)) {
-                mkdir($templatesDir, 0755, true);
+                \Log::info('Templates directory does not exist, creating it');
+                if (!mkdir($templatesDir, 0777, true)) {
+                    throw new \Exception("Failed to create templates directory: {$templatesDir}");
+                }
+                chmod($templatesDir, 0777);
+                \Log::info('Templates directory created with 0777 permissions');
             }
             
-            // Generate template using Artisan command
-            \Artisan::call('books:create-import-template');
-        }
-        
-        // Check again if file exists after potential creation
-        if (!file_exists($templatePath)) {
+            // Check if directory is writable
+            if (!is_writable($templatesDir)) {
+                \Log::info('Templates directory is not writable, updating permissions');
+                chmod($templatesDir, 0777);
+                if (!is_writable($templatesDir)) {
+                    // Get directory owner and group info if possible
+                    $permInfo = '';
+                    if (function_exists('posix_getpwuid') && function_exists('posix_getgrgid')) {
+                        $owner = posix_getpwuid(fileowner($templatesDir));
+                        $group = posix_getgrgid(filegroup($templatesDir));
+                        $permInfo = " Owner: {$owner['name']}, Group: {$group['name']},";
+                    }
+                    
+                    \Log::error("Templates directory permissions issue.{$permInfo} Permissions: " . 
+                        substr(sprintf('%o', fileperms($templatesDir)), -4));
+                    
+                    throw new \Exception("Templates directory is not writable: {$templatesDir}");
+                }
+                \Log::info('Templates directory permissions updated');
+            }
+            
+            // Clean up existing file if it exists
+            if (file_exists($templatePath)) {
+                \Log::info('Removing existing template file');
+                @unlink($templatePath);
+            }
+            
+            // Generate fresh template using Artisan command
+            \Log::info('Calling books:create-import-template command');
+            $exitCode = \Artisan::call('books:create-import-template');
+            
+            \Log::info('Artisan command exit code: ' . $exitCode);
+            $output = \Artisan::output();
+            \Log::info('Artisan command output: ' . $output);
+            
+            if ($exitCode !== 0) {
+                throw new \Exception('Template creation command failed. Output: ' . $output);
+            }
+            
+            // Check if file exists after creation
+            if (!file_exists($templatePath)) {
+                throw new \Exception('Template file was not created at expected location: ' . $templatePath);
+            }
+            
+            \Log::info('Template file exists, size: ' . filesize($templatePath) . ' bytes');
+            
+            // Manually verify the file can be read
+            $fileData = @file_get_contents($templatePath);
+            if ($fileData === false) {
+                $error = error_get_last();
+                throw new \Exception('Cannot read template file: ' . ($error ? $error['message'] : 'Unknown error'));
+            }
+            
+            // Set file permissions explicitly to ensure it's readable
+            chmod($templatePath, 0666);
+            \Log::info('Set template file permissions to 0666');
+            
+            // Return the file as a download with cache prevention headers
+            \Log::info('Returning file download response');
+            
+            // Create the response first
+            $response = response()->download($templatePath, 'book_import_template.xlsx');
+            
+            // Add headers to the response
+            $response->headers->set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+            $response->headers->set('Pragma', 'no-cache');
+            $response->headers->set('Expires', 'Sat, 01 Jan 2000 00:00:00 GMT');
+            
+            return $response;
+                
+        } catch (\Exception $e) {
+            \Log::error('Template download failed: ' . $e->getMessage());
+            \Log::error('Exception trace: ' . $e->getTraceAsString());
+            
+            // Check PHP environment info for debugging
+            \Log::error('PHP Memory limit: ' . ini_get('memory_limit'));
+            \Log::error('PHP Max execution time: ' . ini_get('max_execution_time'));
+            \Log::error('PHP File uploads enabled: ' . (ini_get('file_uploads') ? 'Yes' : 'No'));
+            
             return response()->json([
                 'status' => 'error',
-                'message' => 'Template file could not be created'
+                'message' => 'Failed to create template: ' . $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
-        
-        return response()->download($templatePath, 'book_import_template.xlsx');
     }
 
     /**

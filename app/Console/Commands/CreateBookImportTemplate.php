@@ -32,93 +32,118 @@ class CreateBookImportTemplate extends Command
     {
         $this->info('Creating book import template...');
 
-        // Create new Spreadsheet object
-        $spreadsheet = new Spreadsheet();
-        
-        // Get the active sheet
-        $sheet = $spreadsheet->getActiveSheet();
-        $sheet->setTitle('Book Import Template');
+        try {
+            // Increase memory limit temporarily
+            $currentMemoryLimit = ini_get('memory_limit');
+            ini_set('memory_limit', '256M');
+            
+            // Clean up any existing file to avoid issues
+            $filePath = storage_path('app/templates/book_import_template.xlsx');
+            if (file_exists($filePath)) {
+                @unlink($filePath);
+                $this->info("Removed existing template file");
+            }
+            
+            // Create new Spreadsheet object
+            $spreadsheet = new Spreadsheet();
+            
+            // Get the active sheet
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Book Import Template');
 
-        // Define headers
-        $headers = ['Title', 'ISBN', 'Authors', 'Description', 'Categories', 'Price', 'Image_URL'];
-        $sheet->fromArray($headers, null, 'A1');
+            // Define headers
+            $headers = ['Title', 'ISBN', 'Authors', 'Description', 'Categories', 'Price', 'Image_URL'];
+            $sheet->fromArray($headers, null, 'A1');
 
-        // Add some sample data
-        $sampleData = [
-            ['The Great Gatsby', '9780743273565', 'F. Scott Fitzgerald', 'A novel about the American Dream', 'Fiction, Classics', '12.99', 'https://example.com/book-cover-1.jpg'],
-            ['To Kill a Mockingbird', '9780061120084', 'Harper Lee', 'A novel about justice and racial inequality', 'Fiction, Classics', '14.99', 'https://example.com/book-cover-2.jpg'],
-            ['', '', '', '', '', '', '']
-        ];
-        $sheet->fromArray($sampleData, null, 'A2');
-
-        // Format headers
-        $headerStyle = [
-            'font' => [
-                'bold' => true,
-                'color' => ['rgb' => 'FFFFFF'],
-            ],
-            'fill' => [
-                'fillType' => Fill::FILL_SOLID,
-                'startColor' => ['rgb' => '4F81BD'],
-            ],
-            'alignment' => [
-                'horizontal' => Alignment::HORIZONTAL_CENTER,
-                'vertical' => Alignment::VERTICAL_CENTER,
-            ],
-            'borders' => [
-                'allBorders' => [
-                    'borderStyle' => Border::BORDER_THIN,
+            // Format headers
+            $headerStyle = [
+                'font' => [
+                    'bold' => true,
+                    'color' => ['rgb' => 'FFFFFF'],
+                    'size' => 12,
                 ],
-            ],
-        ];
-        $sheet->getStyle('A1:G1')->applyFromArray($headerStyle);
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '2C3E50'],
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => 'BDC3C7'],
+                    ],
+                ],
+            ];
+            $sheet->getStyle('A1:G1')->applyFromArray($headerStyle);
 
-        // Set column widths
-        $sheet->getColumnDimension('A')->setWidth(30); // Title
-        $sheet->getColumnDimension('B')->setWidth(20); // ISBN
-        $sheet->getColumnDimension('C')->setWidth(30); // Authors
-        $sheet->getColumnDimension('D')->setWidth(50); // Description
-        $sheet->getColumnDimension('E')->setWidth(30); // Categories
-        $sheet->getColumnDimension('F')->setWidth(15); // Price
-        $sheet->getColumnDimension('G')->setWidth(40); // Image URL
+            // Set column widths
+            $sheet->getColumnDimension('A')->setWidth(40); // Title
+            $sheet->getColumnDimension('B')->setWidth(20); // ISBN
+            $sheet->getColumnDimension('C')->setWidth(40); // Authors
+            $sheet->getColumnDimension('D')->setWidth(50); // Description
+            $sheet->getColumnDimension('E')->setWidth(30); // Categories
+            $sheet->getColumnDimension('F')->setWidth(15); // Price
+            $sheet->getColumnDimension('G')->setWidth(40); // Image URL
 
-        // Add data validation for required fields
-        $requiredStyle = [
-            'font' => [
-                'bold' => true,
-                'color' => ['rgb' => 'FF0000'],
-            ],
-        ];
-        
-        // Add notes about required fields and formatting
-        $sheet->setCellValue('A6', 'Note:');
-        $sheet->setCellValue('A7', '* Title, ISBN, and Authors are required fields.');
-        $sheet->setCellValue('A8', '* Multiple authors or categories should be separated by commas.');
-        $sheet->setCellValue('A9', '* Price should be a number (e.g., 12.99).');
-        $sheet->setCellValue('A10', '* Image_URL should be a valid web URL to an image (e.g., https://example.com/image.jpg).');
-        $sheet->setCellValue('A11', '* First two rows contain sample data. Please remove or replace them.');
-        
-        $sheet->getStyle('A7')->applyFromArray($requiredStyle);
-        $sheet->mergeCells('A7:G7');
-        $sheet->mergeCells('A8:G8');
-        $sheet->mergeCells('A9:G9');
-        $sheet->mergeCells('A10:G10');
-        $sheet->mergeCells('A11:G11');
-        
-        // Create the Excel file
-        $writer = new Xlsx($spreadsheet);
-        $filePath = storage_path('app/templates/book_import_template.xlsx');
+            // Create the Excel file
+            $writer = new Xlsx($spreadsheet);
 
-        // Ensure the directory exists
-        $templateDir = storage_path('app/templates');
-        if (!file_exists($templateDir)) {
-            mkdir($templateDir, 0755, true);
+            // Ensure the directory exists with proper permissions
+            $templateDir = storage_path('app/templates');
+            if (!file_exists($templateDir)) {
+                if (!mkdir($templateDir, 0777, true)) {
+                    throw new \Exception("Failed to create directory: {$templateDir}");
+                }
+                chmod($templateDir, 0777); // Ensure directory is writable
+                $this->info("Created directory: {$templateDir}");
+            }
+
+            // Check if directory is writable
+            if (!is_writable($templateDir)) {
+                chmod($templateDir, 0777);
+                if (!is_writable($templateDir)) {
+                    throw new \Exception("Directory is not writable: {$templateDir}");
+                }
+                $this->info("Updated permissions for directory: {$templateDir}");
+            }
+
+            // Save the file with options to optimize memory use
+            $writer->setPreCalculateFormulas(false);
+            $writer->save($filePath);
+
+            // Check if the file was created successfully
+            if (!file_exists($filePath)) {
+                throw new \Exception("Failed to create template file at: {$filePath}");
+            }
+            
+            // Ensure file permissions allow reading
+            chmod($filePath, 0666);
+
+            // Restore original memory limit
+            ini_set('memory_limit', $currentMemoryLimit);
+
+            $this->info('Template created successfully: ' . $filePath);
+            
+            return Command::SUCCESS;
+        } catch (\Exception $e) {
+            $this->error('Failed to create template: ' . $e->getMessage());
+            \Log::error('Template creation failed: ' . $e->getMessage());
+            
+            // Clean up any partial file
+            if (isset($filePath) && file_exists($filePath)) {
+                @unlink($filePath);
+                $this->info("Cleaned up partial template file");
+            }
+            
+            // Restore original memory limit if set
+            if (isset($currentMemoryLimit)) {
+                ini_set('memory_limit', $currentMemoryLimit);
+            }
+            
+            return Command::FAILURE;
         }
-
-        $writer->save($filePath);
-
-        $this->info('Template created successfully: ' . $filePath);
-        
-        return Command::SUCCESS;
     }
 } 
