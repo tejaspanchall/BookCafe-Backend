@@ -23,6 +23,7 @@ Data is stored primarily in PostgreSQL with Redis caching for improved performan
 - 🔍 Advanced search and filtering capabilities with PostgreSQL full-text search
 - 🔒 Robust security features
 - 📊 User-specific book library management
+- 📈 Bulk book import via Excel templates
 - 💾 Redis caching for improved performance
 - 🌱 Database seeding with popular books
 
@@ -36,6 +37,7 @@ Data is stored primarily in PostgreSQL with Redis caching for improved performan
 - **Authentication**: Laravel Sanctum
 - **Queue System**: Laravel Queue with Database Driver
 - **File Storage**: Laravel Storage
+- **Excel Processing**: PhpSpreadsheet library
 
 ## Prerequisites
 
@@ -96,7 +98,12 @@ php artisan storage:link
 php artisan search:update-vectors
 ```
 
-8. Start the development server:
+8. Generate Excel template for book imports:
+```bash
+php artisan books:create-import-template
+```
+
+9. Start the development server:
 ```bash
 php artisan serve
 ```
@@ -123,6 +130,13 @@ The API will be available at `http://localhost:8000/api`
 - `POST /api/books/add` - Add a new book (requires teacher role)
 - `PUT /api/books/{book}` - Update a book (requires teacher role)
 - `DELETE /api/books/{book}` - Delete a book (requires teacher role)
+
+### Excel Imports
+- `POST /api/excel-imports/upload` - Upload Excel file (requires teacher role)
+- `GET /api/excel-imports/files` - Get uploaded Excel files (requires teacher role)
+- `DELETE /api/excel-imports/file/{fileId}` - Delete Excel file (requires teacher role)
+- `POST /api/excel-imports/import/{fileId}` - Import books from Excel file (requires teacher role)
+- `GET /api/excel-imports/template` - Download Excel template (requires teacher role)
 
 ### Categories
 - `GET /api/categories` - Get all categories
