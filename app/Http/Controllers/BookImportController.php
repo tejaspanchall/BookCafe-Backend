@@ -482,41 +482,25 @@ class BookImportController extends Controller
             $templatesDir = storage_path('app/templates');
             \Log::info('Templates directory: ' . $templatesDir);
             
-            // Create directory if it doesn't exist with more permissive permissions
+            // Create directory if it doesn't exist
             if (!file_exists($templatesDir)) {
                 \Log::info('Templates directory does not exist, creating it');
-                if (!mkdir($templatesDir, 0777, true)) {
-                    throw new \Exception("Failed to create templates directory: {$templatesDir}");
-                }
-                chmod($templatesDir, 0777);
-                \Log::info('Templates directory created with 0777 permissions');
-            }
-            
-            // Check if directory is writable
-            if (!is_writable($templatesDir)) {
-                \Log::info('Templates directory is not writable, updating permissions');
-                chmod($templatesDir, 0777);
-                if (!is_writable($templatesDir)) {
-                    // Get directory owner and group info if possible
-                    $permInfo = '';
-                    if (function_exists('posix_getpwuid') && function_exists('posix_getgrgid')) {
-                        $owner = posix_getpwuid(fileowner($templatesDir));
-                        $group = posix_getgrgid(filegroup($templatesDir));
-                        $permInfo = " Owner: {$owner['name']}, Group: {$group['name']},";
+                try {
+                    if (!mkdir($templatesDir, 0755, true)) {
+                        throw new \Exception("Failed to create templates directory: {$templatesDir}");
                     }
-                    
-                    \Log::error("Templates directory permissions issue.{$permInfo} Permissions: " . 
-                        substr(sprintf('%o', fileperms($templatesDir)), -4));
-                    
-                    throw new \Exception("Templates directory is not writable: {$templatesDir}");
+                    // Try to set permissions but don't fail if it doesn't work
+                    try {
+                        chmod($templatesDir, 0755);
+                        \Log::info('Templates directory created with 0755 permissions');
+                    } catch (\Exception $e) {
+                        \Log::warning('Could not set permissions on templates directory: ' . $e->getMessage());
+                        // Continue execution, don't rethrow
+                    }
+                } catch (\Exception $e) {
+                    \Log::error('Failed to create templates directory: ' . $e->getMessage());
+                    throw new \Exception("Could not create template directory. Please contact administrator.");
                 }
-                \Log::info('Templates directory permissions updated');
-            }
-            
-            // Clean up existing file if it exists
-            if (file_exists($templatePath)) {
-                \Log::info('Removing existing template file');
-                @unlink($templatePath);
             }
             
             // Generate fresh template using Artisan command
@@ -528,26 +512,24 @@ class BookImportController extends Controller
             \Log::info('Artisan command output: ' . $output);
             
             if ($exitCode !== 0) {
-                throw new \Exception('Template creation command failed. Output: ' . $output);
+                throw new \Exception('Template creation failed. Please contact administrator.');
             }
             
             // Check if file exists after creation
             if (!file_exists($templatePath)) {
-                throw new \Exception('Template file was not created at expected location: ' . $templatePath);
+                throw new \Exception('Template file could not be created. Please contact administrator.');
             }
             
             \Log::info('Template file exists, size: ' . filesize($templatePath) . ' bytes');
             
-            // Manually verify the file can be read
-            $fileData = @file_get_contents($templatePath);
-            if ($fileData === false) {
-                $error = error_get_last();
-                throw new \Exception('Cannot read template file: ' . ($error ? $error['message'] : 'Unknown error'));
+            // Try to set file permissions but don't fail if it doesn't work
+            try {
+                chmod($templatePath, 0644);
+                \Log::info('Set template file permissions to 0644');
+            } catch (\Exception $e) {
+                \Log::warning('Could not set permissions on template file: ' . $e->getMessage());
+                // Continue execution, don't rethrow
             }
-            
-            // Set file permissions explicitly to ensure it's readable
-            chmod($templatePath, 0666);
-            \Log::info('Set template file permissions to 0666');
             
             // Return the file as a download with cache prevention headers
             \Log::info('Returning file download response');
@@ -566,14 +548,16 @@ class BookImportController extends Controller
             \Log::error('Template download failed: ' . $e->getMessage());
             \Log::error('Exception trace: ' . $e->getTraceAsString());
             
-            // Check PHP environment info for debugging
-            \Log::error('PHP Memory limit: ' . ini_get('memory_limit'));
-            \Log::error('PHP Max execution time: ' . ini_get('max_execution_time'));
-            \Log::error('PHP File uploads enabled: ' . (ini_get('file_uploads') ? 'Yes' : 'No'));
+            $errorMessage = $e->getMessage();
+            // Provide a user-friendly message for permission errors
+            if (strpos($errorMessage, 'Permission denied') !== false || 
+                strpos($errorMessage, 'Operation not permitted') !== false) {
+                $errorMessage = 'Server permission error. Please contact your administrator.';
+            }
             
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to create template: ' . $e->getMessage()
+                'message' => 'Failed to create template: ' . $errorMessage
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
