@@ -84,6 +84,95 @@ class BookController extends Controller
     }
 
     /**
+     * Add multiple books at once
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function addMultiple(Request $request)
+    {
+        if (Auth::user()->role !== 'teacher') {
+            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        $request->validate([
+            'books' => 'required|array|min:1',
+            'books.*.title' => 'required|string|max:255',
+            'books.*.authors' => 'required|array',
+            'books.*.authors.*' => 'required|string|max:100',
+            'books.*.isbn' => 'required|string|max:20',
+            'books.*.description' => 'nullable|string',
+            'books.*.categories' => 'nullable|array',
+            'books.*.categories.*' => 'string|max:50',
+            'books.*.price' => 'nullable|numeric',
+        ]);
+
+        $results = [
+            'success' => [],
+            'failed' => []
+        ];
+
+        \DB::beginTransaction();
+
+        try {
+            foreach ($request->books as $index => $bookData) {
+                // Check if ISBN already exists
+                if (Book::where('isbn', $bookData['isbn'])->exists()) {
+                    $results['failed'][] = [
+                        'index' => $index,
+                        'title' => $bookData['title'],
+                        'isbn' => $bookData['isbn'],
+                        'error' => 'ISBN already exists'
+                    ];
+                    continue;
+                }
+                
+                $book = new Book();
+                $book->title = $bookData['title'];
+                $book->isbn = $bookData['isbn'];
+                $book->description = $bookData['description'] ?? null;
+                $book->price = $bookData['price'] ?? null;
+                $book->created_at = now();
+                $book->save();
+
+                // Handle authors
+                if (isset($bookData['authors']) && is_array($bookData['authors'])) {
+                    $this->syncAuthors($book, $bookData['authors']);
+                }
+
+                // Handle categories
+                if (isset($bookData['categories']) && is_array($bookData['categories'])) {
+                    $this->syncCategories($book, $bookData['categories']);
+                }
+
+                $results['success'][] = [
+                    'index' => $index,
+                    'id' => $book->id,
+                    'title' => $book->title,
+                    'isbn' => $book->isbn
+                ];
+            }
+
+            \DB::commit();
+            $this->refreshBookCaches();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => count($results['success']) . ' books added successfully',
+                'results' => $results
+            ], Response::HTTP_CREATED);
+        } catch (\Exception $e) {
+            \DB::rollBack();
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to add books',
+                'error' => $e->getMessage(),
+                'results' => $results
+            ], Response::HTTP_BAD_REQUEST);
+        }
+    }
+
+    /**
      * Get all books
      */
     public function getBooks()
@@ -882,6 +971,87 @@ class BookController extends Controller
                 'status' => 'success',
                 'books' => $booksWithUrls
             ]);
+        }
+    }
+
+    /**
+     * Export books as Excel file
+     * 
+     * @return \Illuminate\Http\Response
+     */
+    public function exportBooks()
+    {
+        if (Auth::user()->role !== 'teacher') {
+            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            // Get all books with their relationships
+            $books = Book::with(['authors', 'categories'])->get();
+            
+            // Create a new spreadsheet
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
+            
+            // Set headers
+            $sheet->setCellValue('A1', 'Title');
+            $sheet->setCellValue('B1', 'ISBN');
+            $sheet->setCellValue('C1', 'Authors');
+            $sheet->setCellValue('D1', 'Categories');
+            $sheet->setCellValue('E1', 'Description');
+            $sheet->setCellValue('F1', 'Price');
+            
+            // Style headers
+            $headerStyle = [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E9E9E9']
+                ]
+            ];
+            $sheet->getStyle('A1:F1')->applyFromArray($headerStyle);
+            
+            // Add data
+            $row = 2;
+            foreach ($books as $book) {
+                $sheet->setCellValue('A' . $row, $book->title);
+                $sheet->setCellValue('B' . $row, $book->isbn);
+                
+                // Join authors
+                $authorNames = $book->authors->pluck('name')->implode(', ');
+                $sheet->setCellValue('C' . $row, $authorNames);
+                
+                // Join categories
+                $categoryNames = $book->categories->pluck('name')->implode(', ');
+                $sheet->setCellValue('D' . $row, $categoryNames);
+                
+                $sheet->setCellValue('E' . $row, $book->description);
+                $sheet->setCellValue('F' . $row, $book->price);
+                
+                $row++;
+            }
+            
+            // Auto-size columns
+            foreach (range('A', 'F') as $column) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
+            }
+            
+            // Create writer
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
+            
+            // Create a temporary file
+            $tempFilePath = tempnam(sys_get_temp_dir(), 'books_export_');
+            $writer->save($tempFilePath);
+            
+            // Return file download response
+            return response()->download($tempFilePath, 'books_export_' . date('Y-m-d') . '.xlsx')
+                ->deleteFileAfterSend(true);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to export books',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 } 
