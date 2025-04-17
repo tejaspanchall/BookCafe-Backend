@@ -69,10 +69,11 @@ class ProcessBookImport extends Command
         
         try {
             $spreadsheet = IOFactory::load($file);
-            $worksheet = $spreadsheet->getActiveSheet();
+            // Explicitly select the first sheet (index 0) regardless of which sheet is active
+            $worksheet = $spreadsheet->getSheet(0);
             $rows = $worksheet->toArray();
-            $this->info('Excel file loaded successfully. Total rows: ' . count($rows));
-            Log::info('Excel file loaded successfully. Total rows: ' . count($rows));
+            $this->info('Excel file loaded successfully. Total rows: ' . count($rows) . ', using sheet: ' . $worksheet->getTitle());
+            Log::info('Excel file loaded successfully. Total rows: ' . count($rows) . ', using sheet: ' . $worksheet->getTitle());
             
             // Remove header row
             $header = array_shift($rows);
@@ -138,6 +139,18 @@ class ProcessBookImport extends Command
                         $this->output->progressAdvance();
                         continue;
                     }
+                    
+                    // Validate ISBN format (must be 10 or 13 digits, numbers only)
+                    $isbn = preg_replace('/[^0-9]/', '', $row[$headerMap['isbn']]); // Remove any non-numeric characters
+                    if (strlen($isbn) !== 10 && strlen($isbn) !== 13) {
+                        $results['failed']++;
+                        $results['errors'][] = "Row $rowNum: ISBN must be 10 or 13 digits (numbers only)";
+                        $this->output->progressAdvance();
+                        continue;
+                    }
+                    
+                    // Set the cleaned ISBN value back to the row array
+                    $row[$headerMap['isbn']] = $isbn;
                     
                     if (empty($row[$headerMap['authors']])) {
                         $results['failed']++;

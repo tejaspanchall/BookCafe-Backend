@@ -8,6 +8,7 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Color;
 
 class CreateBookImportTemplate extends Command
 {
@@ -47,7 +48,7 @@ class CreateBookImportTemplate extends Command
             // Create new Spreadsheet object
             $spreadsheet = new Spreadsheet();
             
-            // Get the active sheet
+            // Set up first sheet (Book Import Template)
             $sheet = $spreadsheet->getActiveSheet();
             $sheet->setTitle('Book Import Template');
 
@@ -87,6 +88,73 @@ class CreateBookImportTemplate extends Command
             $sheet->getColumnDimension('E')->setWidth(30); // Categories
             $sheet->getColumnDimension('F')->setWidth(15); // Price
             $sheet->getColumnDimension('G')->setWidth(40); // Image URL
+            
+            // Create second sheet for instructions and sample data
+            $instructionSheet = $spreadsheet->createSheet();
+            $instructionSheet->setTitle('Instructions & Sample Data');
+            
+            // Add sample data title first
+            $instructionSheet->setCellValue('A1', 'SAMPLE DATA');
+            
+            // Format the section headers
+            $sectionHeaderStyle = [
+                'font' => [
+                    'bold' => true,
+                    'size' => 14,
+                    'color' => ['rgb' => '000000'],
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'EEEEEE'],
+                ],
+            ];
+            $instructionSheet->getStyle('A1')->applyFromArray($sectionHeaderStyle);
+            $instructionSheet->getStyle('A1:G1')->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+            
+            // Add sample data headers
+            $instructionSheet->fromArray($headers, null, 'A3');
+            $instructionSheet->getStyle('A3:G3')->applyFromArray($headerStyle);
+            
+            // Add sample data rows
+            $sampleData = [
+                ['The Great Gatsby', '9780743273565', 'F. Scott Fitzgerald', 'A novel about the mysterious millionaire Jay Gatsby', 'Fiction, Classics', '14.99', 'https://example.com/great-gatsby.jpg'],
+                ['To Kill a Mockingbird', '0061120081', 'Harper Lee', 'The story of racial injustice in the American South', 'Fiction, Classics, Drama', '12.99', 'https://example.com/mockingbird.jpg'],
+                ['1984', '9780451524935', 'George Orwell', 'A dystopian novel set in a totalitarian regime', 'Fiction, Dystopian, Classics', '11.50', 'https://example.com/1984.jpg'],
+            ];
+            
+            $row = 4;
+            foreach ($sampleData as $data) {
+                $instructionSheet->fromArray($data, null, 'A' . $row);
+                $row++;
+            }
+            
+            // Format sample data
+            $instructionSheet->getStyle('A4:G6')->getBorders()->getAllBorders()->setBorderStyle(Border::BORDER_THIN);
+            
+            // Add instructions below sample data
+            $instructionSheet->setCellValue('A8', 'INSTRUCTIONS');
+            $instructionSheet->getStyle('A8')->applyFromArray($sectionHeaderStyle);
+            $instructionSheet->getStyle('A8:G8')->getBorders()->getBottom()->setBorderStyle(Border::BORDER_MEDIUM);
+            
+            $instructionSheet->setCellValue('A9', 'Please follow these guidelines when filling out the template:');
+            $instructionSheet->setCellValue('A11', '1. Only data from the "Book Import Template" sheet will be imported.');
+            $instructionSheet->setCellValue('A12', '2. Required fields: Title, ISBN, and Authors.');
+            $instructionSheet->setCellValue('A13', '3. ISBN must be 10 or 13 digits, numbers only (no dashes or spaces).');
+            $instructionSheet->setCellValue('A14', '4. Authors should be separated by commas (e.g., "John Doe, Jane Smith").');
+            $instructionSheet->setCellValue('A15', '5. Categories should be separated by commas (e.g., "Fiction, Fantasy, Adventure").');
+            $instructionSheet->setCellValue('A16', '6. Price should be a numeric value (e.g., 19.99).');
+            $instructionSheet->setCellValue('A17', '7. Image_URL should be a valid URL to an image (optional).');
+            
+            // Set column widths for instruction sheet
+            $instructionSheet->getColumnDimension('A')->setWidth(60);
+            
+            // Auto-size columns for better readability
+            foreach (range('A', 'G') as $column) {
+                $instructionSheet->getColumnDimension($column)->setAutoSize(true);
+            }
+            
+            // Set the first sheet as active
+            $spreadsheet->setActiveSheetIndex(0);
 
             // Create the Excel file
             $writer = new Xlsx($spreadsheet);
