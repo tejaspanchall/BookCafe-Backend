@@ -14,6 +14,9 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 use Symfony\Component\HttpFoundation\Response;
 use Illuminate\Support\Facades\Cache;
 use App\Traits\RedisCacheTrait;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use ReflectionMethod;
 
 class BookImportController extends Controller
 {
@@ -29,26 +32,28 @@ class BookImportController extends Controller
      */
     public function uploadExcel(Request $request)
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
-        $request->validate([
-            'excel_file' => 'required|file|mimes:xlsx,xls,csv|max:10240',
-        ]);
-
         try {
-            $file = $request->file('excel_file');
-            $filename = time() . '_' . $file->getClientOriginalName();
-            $path = $file->storeAs('excel_imports', $filename, 'public');
+            // Validate the uploaded file
+            $request->validate([
+                'excel_file' => 'required|mimes:xlsx,xls,csv|max:10240', // max 10MB
+            ]);
+
+            // Generate a unique file ID
+            $fileId = Str::uuid()->toString();
+
+            // Store the file with the UUID as the filename in a public directory
+            $path = $request->file('excel_file')->storeAs('excel_imports', $fileId, 'public');
+
+            if (!$path) {
+                throw new \Exception('Failed to store file');
+            }
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Excel file uploaded successfully',
-                'file_id' => $filename,
-                'original_name' => $file->getClientOriginalName(),
-                'uploaded_at' => now()->toDateTimeString(),
-            ], Response::HTTP_CREATED);
+                'file_id' => $fileId,
+                'file_name' => $request->file('excel_file')->getClientOriginalName()
+            ]);
         } catch (\Exception $e) {
             return response()->json([
                 'status' => 'error',
@@ -63,35 +68,35 @@ class BookImportController extends Controller
      */
     public function getExcelFiles()
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
         try {
-            $files = Storage::disk('public')->files('excel_imports');
-            $fileDetails = [];
+            $files = [];
+            $disk = Storage::disk('public');
+            $storedFiles = $disk->files('excel_imports');
 
-            foreach ($files as $file) {
-                $filename = pathinfo($file, PATHINFO_BASENAME);
-                $originalName = preg_replace('/^\d+_/', '', $filename);
-                $timestamp = intval(substr($filename, 0, strpos($filename, '_')));
-                $date = date('Y-m-d H:i:s', $timestamp);
-
-                $fileDetails[] = [
-                    'file_id' => $filename,
-                    'original_name' => $originalName,
-                    'uploaded_at' => $date,
+            foreach ($storedFiles as $file) {
+                // Extract the file ID (UUID) from the path
+                $fileId = basename($file);
+                
+                // Get file metadata
+                $lastModified = $disk->lastModified($file);
+                
+                $files[] = [
+                    'file_id' => $fileId,
+                    'file_name' => $fileId, // Original name not stored
+                    'size' => $disk->size($file),
+                    'last_modified' => $lastModified,
+                    'created_at' => date('Y-m-d H:i:s', $lastModified)
                 ];
             }
 
-            // Sort by upload time, newest first
-            usort($fileDetails, function($a, $b) {
-                return strtotime($b['uploaded_at']) - strtotime($a['uploaded_at']);
+            // Sort by last modified date (newest first)
+            usort($files, function($a, $b) {
+                return $b['last_modified'] - $a['last_modified'];
             });
 
             return response()->json([
                 'status' => 'success',
-                'files' => $fileDetails
+                'files' => $files
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -107,10 +112,6 @@ class BookImportController extends Controller
      */
     public function deleteExcelFile($fileId)
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
         try {
             $filePath = 'excel_imports/' . $fileId;
             
@@ -141,401 +142,189 @@ class BookImportController extends Controller
      */
     public function importBooks($fileId)
     {
-        \Log::info('ImportBooks method called with fileId: ' . $fileId);
-        
-        if (Auth::user()->role !== 'teacher') {
-            \Log::warning('Unauthorized attempt to import books - user is not a teacher');
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
-        // Check database connection before proceeding
-        if (!$this->checkDatabaseConnection()) {
-            \Log::error('Database connection check failed');
-            return response()->json([
-                'status' => 'error',
-                'message' => 'Database connection error. Please try again later.'
-            ], Response::HTTP_INTERNAL_SERVER_ERROR);
-        }
-
-        $filePath = 'excel_imports/' . $fileId;
-        \Log::info('Looking for file at path: ' . $filePath);
-        
-        if (!Storage::disk('public')->exists($filePath)) {
-            \Log::error('File not found: ' . $filePath);
-            return response()->json([
-                'status' => 'error',
-                'message' => 'File not found'
-            ], Response::HTTP_NOT_FOUND);
-        }
-
-        $file = Storage::disk('public')->path($filePath);
-        \Log::info('Full file path: ' . $file);
-        \Log::info('Starting Excel import process for file: ' . $filePath);
-
         try {
-            $spreadsheet = IOFactory::load($file);
-            // Explicitly select the first sheet (index 0) regardless of which sheet is active
-            $worksheet = $spreadsheet->getSheet(0);
-            $rows = $worksheet->toArray();
-            \Log::info('Excel file loaded successfully. Total rows: ' . count($rows) . ', using sheet: ' . $worksheet->getTitle());
+            $filePath = 'excel_imports/' . $fileId;
             
-            // Remove header row
-            $header = array_shift($rows);
-            \Log::info('Header row: ' . json_encode($header));
-            
-            // Validate header row
-            $requiredColumns = ['title', 'isbn', 'authors'];
-            $headerMap = [];
-            
-            foreach ($requiredColumns as $column) {
-                $index = array_search(strtolower($column), array_map('strtolower', $header));
-                if ($index === false) {
-                    \Log::error("Required column '$column' not found in Excel file");
-                    return response()->json([
-                        'status' => 'error',
-                        'message' => "Required column '$column' not found in Excel file"
-                    ], Response::HTTP_BAD_REQUEST);
-                }
-                $headerMap[$column] = $index;
+            if (!Storage::disk('public')->exists($filePath)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'File not found'
+                ], Response::HTTP_NOT_FOUND);
             }
             
-            // Map optional columns
-            $optionalColumns = ['description', 'categories', 'price', 'image_url'];
-            foreach ($optionalColumns as $column) {
-                $index = array_search(strtolower($column), array_map('strtolower', $header));
-                if ($index !== false) {
-                    $headerMap[$column] = $index;
-                }
-            }
-            \Log::info('Header mapping: ' . json_encode($headerMap));
+            // Full path to the file
+            $fullPath = Storage::disk('public')->path($filePath);
             
+            // Create a new Reader for the file type
+            $inputFileType = \PhpOffice\PhpSpreadsheet\IOFactory::identify($fullPath);
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader($inputFileType);
+            $reader->setReadDataOnly(true);
+            
+            // Load the spreadsheet
+            $spreadsheet = $reader->load($fullPath);
+            $worksheet = $spreadsheet->getActiveSheet();
+            
+            // Get the highest row number
+            $highestRow = $worksheet->getHighestRow();
+            
+            // Validate that the file has data
+            if ($highestRow <= 1) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'The Excel file is empty or contains only headers'
+                ], Response::HTTP_BAD_REQUEST);
+            }
+            
+            // Track import results
             $results = [
+                'total' => $highestRow - 1,
                 'success' => 0,
                 'failed' => 0,
-                'errors' => [],
-                'duplicates' => 0,
-                'duplicate_details' => [],
-                'book_ids' => [] // Add an array to track created book IDs for verification
+                'errors' => []
             ];
-
-            DB::beginTransaction();
-            \Log::info('Database transaction started');
             
-            try {
-                foreach ($rows as $rowIndex => $row) {
-                    $rowNum = $rowIndex + 2; // +2 because we removed header and Excel is 1-indexed
-                    \Log::info("Processing row $rowNum: " . json_encode($row));
-                    
-                    // Skip empty rows
-                    if (empty($row[$headerMap['title']]) && empty($row[$headerMap['isbn']])) {
-                        \Log::info("Row $rowNum: Skipping empty row");
-                        continue;
-                    }
+            // Begin database transaction
+            \DB::beginTransaction();
+            
+            // Process each row starting from row 2 (assuming row 1 is header)
+            for ($row = 2; $row <= $highestRow; $row++) {
+                try {
+                    $title = $worksheet->getCellByColumnAndRow(1, $row)->getValue();
+                    $isbn = $worksheet->getCellByColumnAndRow(2, $row)->getValue();
+                    $authorsRaw = $worksheet->getCellByColumnAndRow(3, $row)->getValue();
+                    $categoriesRaw = $worksheet->getCellByColumnAndRow(4, $row)->getValue();
+                    $description = $worksheet->getCellByColumnAndRow(5, $row)->getValue();
+                    $price = $worksheet->getCellByColumnAndRow(6, $row)->getValue();
                     
                     // Validate required fields
-                    if (empty($row[$headerMap['title']])) {
-                        $results['failed']++;
-                        $results['errors'][] = "Row $rowNum: Title is required";
-                        \Log::warning("Row $rowNum: Title is required");
-                        continue;
+                    if (empty($title) || empty($isbn)) {
+                        throw new \Exception('Title and ISBN are required');
                     }
                     
-                    if (empty($row[$headerMap['isbn']])) {
-                        $results['failed']++;
-                        $results['errors'][] = "Row $rowNum: ISBN is required";
-                        \Log::warning("Row $rowNum: ISBN is required");
-                        continue;
+                    // Validate ISBN is unique
+                    if (Book::where('isbn', $isbn)->exists()) {
+                        throw new \Exception("ISBN '$isbn' already exists");
                     }
                     
-                    // Validate ISBN format (must be 10 or 13 digits, numbers only)
-                    $isbn = preg_replace('/[^0-9]/', '', $row[$headerMap['isbn']]); // Remove any non-numeric characters
-                    if (strlen($isbn) !== 10 && strlen($isbn) !== 13) {
-                        $results['failed']++;
-                        $results['errors'][] = "Row $rowNum: ISBN must be 10 or 13 digits (numbers only)";
-                        \Log::warning("Row $rowNum: Invalid ISBN format. Found: {$row[$headerMap['isbn']]}, cleaned: {$isbn}, length: " . strlen($isbn));
-                        continue;
+                    // Process authors (comma separated)
+                    $authors = array_map('trim', explode(',', $authorsRaw ?? ''));
+                    if (empty($authors[0])) {
+                        throw new \Exception('At least one author is required');
                     }
                     
-                    // Set the cleaned ISBN value back to the row array
-                    $row[$headerMap['isbn']] = $isbn;
-                    
-                    if (empty($row[$headerMap['authors']])) {
-                        $results['failed']++;
-                        $results['errors'][] = "Row $rowNum: Authors are required";
-                        \Log::warning("Row $rowNum: Authors are required");
-                        continue;
+                    // Process categories (comma separated)
+                    $categories = [];
+                    if (!empty($categoriesRaw)) {
+                        $categories = array_map('trim', explode(',', $categoriesRaw));
                     }
                     
-                    // Check for duplicate ISBN
-                    $existingBook = Book::where('isbn', $row[$headerMap['isbn']])->first();
-                    if ($existingBook) {
-                        $results['duplicates']++;
-                        $results['duplicate_details'][] = [
-                            'row' => $rowNum,
-                            'isbn' => $row[$headerMap['isbn']],
-                            'title' => $row[$headerMap['title']],
-                            'existing_title' => $existingBook->title
-                        ];
-                        \Log::warning("Row $rowNum: Duplicate ISBN " . $row[$headerMap['isbn']]);
-                        continue;
+                    // Create the book
+                    $book = new Book();
+                    $book->title = $title;
+                    $book->isbn = $isbn;
+                    $book->description = $description;
+                    $book->price = is_numeric($price) ? $price : null;
+                    $book->created_at = now();
+                    $book->save();
+                    
+                    // Add authors and categories
+                    $this->addBookAuthors($book, $authors);
+                    if (!empty($categories[0])) {
+                        $this->addBookCategories($book, $categories);
                     }
                     
-                    try {
-                        // Create book
-                        $book = new Book();
-                        $book->title = $row[$headerMap['title']];
-                        $book->isbn = $row[$headerMap['isbn']];
-                        \Log::info("Row $rowNum: Creating book with title: " . $book->title . " and ISBN: " . $book->isbn);
-                        
-                        if (isset($headerMap['description']) && isset($row[$headerMap['description']])) {
-                            $book->description = $row[$headerMap['description']];
-                        } else {
-                            $book->description = ""; // Set default empty description
-                        }
-                        
-                        if (isset($headerMap['price']) && !empty($row[$headerMap['price']])) {
-                            $book->price = $row[$headerMap['price']];
-                        } else {
-                            $book->price = null; // Set default null price
-                        }
-                        
-                        // Handle image URL if present
-                        if (isset($headerMap['image_url']) && !empty($row[$headerMap['image_url']])) {
-                            $imageUrl = trim($row[$headerMap['image_url']]);
-                            if (filter_var($imageUrl, FILTER_VALIDATE_URL)) {
-                                $book->image = $imageUrl;
-                            } else {
-                                $results['errors'][] = "Row $rowNum: Invalid image URL - " . $imageUrl;
-                                \Log::warning("Row $rowNum: Invalid image URL - " . $imageUrl);
-                            }
-                        } else {
-                            $book->image = null; // Set default null image
-                        }
-                        
-                        // Set the created_at timestamp to now
-                        $book->created_at = now();
-                        \Log::info("Row $rowNum: About to save book");
-                        
-                        // Temporarily disable trigger to avoid search_vector issues
-                        try {
-                            DB::statement('ALTER TABLE books DISABLE TRIGGER books_search_vector_update');
-                            \Log::info("Row $rowNum: Disabled search_vector trigger");
-                        } catch (\Exception $triggerEx) {
-                            \Log::warning("Row $rowNum: Could not disable trigger: " . $triggerEx->getMessage());
-                        }
-                        
-                        $saveResult = $book->save();
-                        \Log::info("Row $rowNum: Book save result: " . ($saveResult ? 'Success' : 'Failed'));
-                        
-                        // Re-enable trigger
-                        try {
-                            DB::statement('ALTER TABLE books ENABLE TRIGGER books_search_vector_update');
-                            \Log::info("Row $rowNum: Re-enabled search_vector trigger");
-                        } catch (\Exception $triggerEx) {
-                            \Log::warning("Row $rowNum: Could not re-enable trigger: " . $triggerEx->getMessage());
-                        }
-                        
-                        if (!$saveResult) {
-                            \Log::error("Row $rowNum: Failed to save book with Eloquent, trying direct DB insertion");
-                            
-                            // Fallback method: direct database insertion
-                            try {
-                                $bookId = DB::table('books')->insertGetId([
-                                    'title' => $book->title,
-                                    'isbn' => $book->isbn,
-                                    'description' => $book->description,
-                                    'price' => $book->price,
-                                    'image' => $book->image,
-                                    'created_at' => now()
-                                ]);
-                                
-                                if ($bookId) {
-                                    \Log::info("Row $rowNum: Book successfully inserted via direct DB with ID: $bookId");
-                                    $book->id = $bookId;
-                                } else {
-                                    \Log::error("Row $rowNum: Direct DB insertion also failed");
-                                    throw new \Exception("Failed to insert book");
-                                }
-                            } catch (\Exception $dbEx) {
-                                \Log::error("Row $rowNum: DB insertion exception: " . $dbEx->getMessage());
-                                throw $dbEx;
-                            }
-                        }
-                        
-                        // Store the created book ID for verification
-                        $results['book_ids'][] = $book->id;
-                        
-                        // Verify book was actually created
-                        $verifyBook = Book::find($book->id);
-                        if (!$verifyBook) {
-                            \Log::error("Row $rowNum: Book verification failed - Book with ID {$book->id} not found after save");
-                            throw new \Exception("Book verification failed - Could not find book after creation");
-                        }
-                        \Log::info("Row $rowNum: Book verification successful - Book with ID {$book->id} found");
-                        
-                        // Process authors
-                        $authorNames = array_map('trim', explode(',', $row[$headerMap['authors']]));
-                        \Log::info("Row $rowNum: Processing authors: " . json_encode($authorNames));
-                        
-                        $authorIds = [];
-                        foreach ($authorNames as $authorName) {
-                            if (!empty($authorName)) {
-                                $author = Author::firstOrCreate(['name' => $authorName]);
-                                \Log::info("Row $rowNum: Found/Created author: " . $authorName . " (ID: " . $author->id . ")");
-                                $authorIds[] = $author->id;
-                            }
-                        }
-                        
-                        if (!empty($authorIds)) {
-                            \Log::info("Row $rowNum: Attaching authors: " . implode(', ', $authorIds));
-                            $book->authors()->sync($authorIds);
-                            
-                            // Verify author relationships
-                            $attachedAuthors = $book->authors()->pluck('id')->toArray();
-                            \Log::info("Row $rowNum: Verified attached authors: " . implode(', ', $attachedAuthors));
-                            
-                            if (count($attachedAuthors) !== count($authorIds)) {
-                                \Log::warning("Row $rowNum: Author attachment verification failed - Expected: " . 
-                                    implode(', ', $authorIds) . " but got: " . implode(', ', $attachedAuthors));
-                            }
-                        }
-                        
-                        // Process categories if present
-                        if (isset($headerMap['categories']) && !empty($row[$headerMap['categories']])) {
-                            $categoryNames = array_map('trim', explode(',', $row[$headerMap['categories']]));
-                            \Log::info("Row $rowNum: Processing categories: " . json_encode($categoryNames));
-                            
-                            $categoryIds = [];
-                            foreach ($categoryNames as $categoryName) {
-                                if (!empty($categoryName)) {
-                                    $category = Category::firstOrCreate(['name' => $categoryName]);
-                                    \Log::info("Row $rowNum: Found/Created category: " . $categoryName . " (ID: " . $category->id . ")");
-                                    $categoryIds[] = $category->id;
-                                }
-                            }
-                            
-                            if (!empty($categoryIds)) {
-                                \Log::info("Row $rowNum: Attaching categories: " . implode(', ', $categoryIds));
-                                $book->categories()->sync($categoryIds);
-                                
-                                // Verify category relationships
-                                $attachedCategories = $book->categories()->pluck('id')->toArray();
-                                \Log::info("Row $rowNum: Verified attached categories: " . implode(', ', $attachedCategories));
-                                
-                                if (count($attachedCategories) !== count($categoryIds)) {
-                                    \Log::warning("Row $rowNum: Category attachment verification failed - Expected: " . 
-                                        implode(', ', $categoryIds) . " but got: " . implode(', ', $attachedCategories));
-                                }
-                            }
-                        }
-                        
-                        $results['success']++;
-                        \Log::info("Row $rowNum: Successfully processed");
-                    } catch (\Exception $rowEx) {
-                        \Log::error("Row $rowNum: Exception while processing row: " . $rowEx->getMessage());
-                        $results['failed']++;
-                        $results['errors'][] = "Row $rowNum: " . $rowEx->getMessage();
-                    }
+                    $results['success']++;
+                } catch (\Exception $e) {
+                    $results['failed']++;
+                    $results['errors'][] = [
+                        'row' => $row,
+                        'error' => $e->getMessage()
+                    ];
                 }
+            }
+            
+            // Check if any books were successfully imported
+            if ($results['success'] > 0) {
+                \DB::commit();
                 
-                \Log::info('All rows processed. Committing transaction');
-                DB::commit();
-                
-                // Double-check if books were actually created
-                if (!empty($results['book_ids'])) {
-                    $createdBooks = Book::whereIn('id', $results['book_ids'])->count();
-                    \Log::info("Verification after commit: Found {$createdBooks} of {$results['success']} books");
-                    
-                    if ($createdBooks !== $results['success']) {
-                        \Log::warning("Book count mismatch: Expected {$results['success']} but found {$createdBooks}");
-                    }
-                }
-                
-                // Refresh book caches to ensure imported books appear in catalog
-                \Log::info('Refreshing book caches');
-                $this->refreshBookCaches();
+                // Refresh caches
+                $bookController = app(BookController::class);
+                $refreshMethod = new \ReflectionMethod($bookController, 'refreshBookCaches');
+                $refreshMethod->setAccessible(true);
+                $refreshMethod->invoke($bookController);
                 
                 return response()->json([
                     'status' => 'success',
-                    'message' => 'Books imported successfully',
+                    'message' => $results['success'] . ' books imported successfully',
                     'results' => $results
                 ]);
-            } catch (\Exception $e) {
-                \Log::error('Error in transaction: ' . $e->getMessage());
-                DB::rollBack();
-                throw $e;
+            } else {
+                \DB::rollBack();
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'No books were imported',
+                    'results' => $results
+                ], Response::HTTP_BAD_REQUEST);
             }
         } catch (\Exception $e) {
-            \Log::error('Excel import failed: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            \DB::rollBack();
             return response()->json([
                 'status' => 'error',
-                'message' => 'Failed to import books from Excel file',
+                'message' => 'Failed to import books',
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 
     /**
-     * Download Excel template
+     * Download Excel template for book import
      */
     public function downloadTemplate()
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-        
         try {
-            // Log request for diagnostics
-            \Log::info('Template download requested by user: ' . Auth::id());
+            // Create a new spreadsheet
+            $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+            $sheet = $spreadsheet->getActiveSheet();
             
-            $templatePath = storage_path('app/templates/book_import_template.xlsx');
-            \Log::info('Template path: ' . $templatePath);
+            // Set headers
+            $sheet->setCellValue('A1', 'Title');
+            $sheet->setCellValue('B1', 'ISBN');
+            $sheet->setCellValue('C1', 'Authors (comma separated)');
+            $sheet->setCellValue('D1', 'Categories (comma separated)');
+            $sheet->setCellValue('E1', 'Description');
+            $sheet->setCellValue('F1', 'Price');
             
-            // Always generate a fresh template
-            $templatesDir = storage_path('app/templates');
-            \Log::info('Templates directory: ' . $templatesDir);
+            // Style headers
+            $headerStyle = [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E9E9E9']
+                ]
+            ];
+            $sheet->getStyle('A1:F1')->applyFromArray($headerStyle);
             
-            // Create directory if it doesn't exist
-            if (!file_exists($templatesDir)) {
-                \Log::info('Templates directory does not exist, creating it');
-                try {
-                    if (!mkdir($templatesDir, 0755, true)) {
-                        throw new \Exception("Failed to create templates directory: {$templatesDir}");
-                    }
-                    // Try to set permissions but don't fail if it doesn't work
-                    try {
-                        chmod($templatesDir, 0755);
-                        \Log::info('Templates directory created with 0755 permissions');
-                    } catch (\Exception $e) {
-                        \Log::warning('Could not set permissions on templates directory: ' . $e->getMessage());
-                        // Continue execution, don't rethrow
-                    }
-                } catch (\Exception $e) {
-                    \Log::error('Failed to create templates directory: ' . $e->getMessage());
-                    throw new \Exception("Could not create template directory. Please contact administrator.");
-                }
+            // Add some sample data
+            $sheet->setCellValue('A2', 'Sample Book Title');
+            $sheet->setCellValue('B2', '978-1234567890');
+            $sheet->setCellValue('C2', 'Author Name, Second Author');
+            $sheet->setCellValue('D2', 'Fiction, Fantasy');
+            $sheet->setCellValue('E2', 'This is a sample book description.');
+            $sheet->setCellValue('F2', '29.99');
+            
+            // Auto-size columns
+            foreach (range('A', 'F') as $column) {
+                $sheet->getColumnDimension($column)->setAutoSize(true);
             }
             
-            // Generate fresh template using Artisan command
-            \Log::info('Calling books:create-import-template command');
-            $exitCode = \Artisan::call('books:create-import-template');
+            // Create writer
+            $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
             
-            \Log::info('Artisan command exit code: ' . $exitCode);
-            $output = \Artisan::output();
-            \Log::info('Artisan command output: ' . $output);
+            // Create a temporary file
+            $templatePath = tempnam(sys_get_temp_dir(), 'book_import_template');
+            $writer->save($templatePath);
             
-            if ($exitCode !== 0) {
-                throw new \Exception('Template creation failed. Please contact administrator.');
-            }
-            
-            // Check if file exists after creation
-            if (!file_exists($templatePath)) {
-                throw new \Exception('Template file could not be created. Please contact administrator.');
-            }
-            
-            \Log::info('Template file exists, size: ' . filesize($templatePath) . ' bytes');
-            
-            // Try to set file permissions but don't fail if it doesn't work
+            // Set file permissions
             try {
                 chmod($templatePath, 0644);
                 \Log::info('Set template file permissions to 0644');
@@ -641,6 +430,48 @@ class BookImportController extends Controller
         } catch (\Exception $e) {
             \Log::error('Database connection check failed: ' . $e->getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Add authors to a book
+     * 
+     * @param Book $book
+     * @param array $authors
+     */
+    private function addBookAuthors(Book $book, array $authors)
+    {
+        $authorIds = [];
+        foreach ($authors as $authorName) {
+            if (!empty($authorName)) {
+                $author = Author::firstOrCreate(['name' => $authorName]);
+                $authorIds[] = $author->id;
+            }
+        }
+
+        if (!empty($authorIds)) {
+            $book->authors()->sync($authorIds);
+        }
+    }
+
+    /**
+     * Add categories to a book
+     * 
+     * @param Book $book
+     * @param array $categories
+     */
+    private function addBookCategories(Book $book, array $categories)
+    {
+        $categoryIds = [];
+        foreach ($categories as $categoryName) {
+            if (!empty($categoryName)) {
+                $category = Category::firstOrCreate(['name' => $categoryName]);
+                $categoryIds[] = $category->id;
+            }
+        }
+
+        if (!empty($categoryIds)) {
+            $book->categories()->sync($categoryIds);
         }
     }
 } 

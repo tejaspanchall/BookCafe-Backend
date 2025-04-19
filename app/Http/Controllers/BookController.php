@@ -20,61 +20,55 @@ class BookController extends Controller
 
     public function add(Request $request)
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
         $request->validate([
             'title' => 'required|string|max:255',
-            'authors' => 'required|array',
-            'authors.*' => 'required|string|max:100',
-            'isbn' => 'required|string|max:20|unique:books,isbn',
+            'image' => 'nullable|image|max:2048',
             'description' => 'nullable|string',
+            'isbn' => 'required|string|max:20|unique:books',
+            'authors' => 'required|array|min:1',
+            'authors.*' => 'required|string|max:100',
             'categories' => 'nullable|array',
             'categories.*' => 'string|max:50',
             'price' => 'nullable|numeric',
-            'image' => 'nullable|image|max:2048'
         ]);
+
+        \DB::beginTransaction();
 
         try {
             $book = new Book();
             $book->title = $request->title;
-            $book->isbn = $request->isbn;
             $book->description = $request->description;
+            $book->isbn = $request->isbn;
             $book->price = $request->price;
             $book->created_at = now();
 
-            if ($request->hasFile('image')) {
-                $image = $request->file('image');
-                $filename = time() . '_' . $image->getClientOriginalName();
-                $path = $image->storeAs('books', $filename, 'public');
-                $book->image = $filename;
+            // Handle image upload
+            if ($request->hasFile('image') && $request->file('image')->isValid()) {
+                $fileName = time() . '_' . preg_replace('/[^A-Za-z0-9]/', '', $request->title) . '.' . $request->image->extension();
+                $request->image->storeAs('books', $fileName, 'public');
+                $book->image = $fileName;
             }
 
             $book->save();
 
             // Handle authors
-            if ($request->has('authors') && is_array($request->authors)) {
-                $this->syncAuthors($book, $request->authors);
-            }
+            $this->syncAuthors($book, $request->authors);
 
             // Handle categories
             if ($request->has('categories') && is_array($request->categories)) {
                 $this->syncCategories($book, $request->categories);
             }
 
-            $imageUrl = $book->image 
-                ? url('storage/books/' . urlencode($book->image))
-                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
-
+            \DB::commit();
             $this->refreshBookCaches();
 
             return response()->json([
                 'status' => 'success',
-                'book' => $book->load(['categories', 'authors']),
-                'image_url' => $imageUrl
+                'message' => 'Book added successfully',
+                'book' => $book
             ], Response::HTTP_CREATED);
         } catch (\Exception $e) {
+            \DB::rollBack();
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to add book',
@@ -203,12 +197,11 @@ class BookController extends Controller
         }
     }
 
+    /**
+     * Get all books from the library - accessible to both students and teachers
+     */
     public function getLibrary()
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
         // Bypass cache and get books directly from the database
         $books = Book::with(['categories', 'authors'])
             ->orderBy('created_at', 'desc')
@@ -981,10 +974,6 @@ class BookController extends Controller
      */
     public function exportBooks()
     {
-        if (Auth::user()->role !== 'teacher') {
-            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
-        }
-
         try {
             // Get all books with their relationships
             $books = Book::with(['authors', 'categories'])->get();

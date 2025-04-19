@@ -26,10 +26,15 @@ class AuthController extends Controller
                         'add' => true,
                         'edit' => true,
                         'delete' => true,
+                        'export' => true,
                     ],
                     'library' => [
                         'access' => true,
                         'manage' => true
+                    ],
+                    'dashboard' => [
+                        'access' => true,
+                        'admin' => true
                     ]
                 ],
                 'student' => [
@@ -38,10 +43,15 @@ class AuthController extends Controller
                         'add' => false,
                         'edit' => false,
                         'delete' => false,
+                        'export' => false,
                     ],
                     'library' => [
                         'access' => true,
                         'manage' => false
+                    ],
+                    'dashboard' => [
+                        'access' => true,
+                        'admin' => false
                     ]
                 ]
             ];

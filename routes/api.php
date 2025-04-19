@@ -16,13 +16,11 @@ Route::prefix('books')->group(function () {
 
 Route::prefix('categories')->group(function () {
     Route::get('/', [CategoryController::class, 'index']);
-    Route::post('/', [CategoryController::class, 'store']);
     Route::get('/{id}/books', [CategoryController::class, 'getBooks']);
 });
 
 Route::prefix('authors')->group(function () {
     Route::get('/', [AuthorController::class, 'index']);
-    Route::post('/', [AuthorController::class, 'store']);
     Route::get('/{id}/books', [AuthorController::class, 'getBooks']);
 });
 
@@ -37,20 +35,27 @@ Route::prefix('auth')->group(function () {
     });
 });
 
+// Routes that require authentication
 Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('books')->group(function () {
+        // Routes for all authenticated users
         Route::get('/my-library', [BookController::class, 'myLibrary']);
         Route::post('/{book}/add-to-library', [BookController::class, 'addToLibrary']);
         Route::delete('/{book}/remove-from-library', [BookController::class, 'removeFromLibrary']);
         Route::get('/get-library', [BookController::class, 'getLibrary']);
-        Route::post('/add', [BookController::class, 'add']);
-        Route::post('/add-multiple', [BookController::class, 'addMultiple']);
-        Route::get('/export', [BookController::class, 'exportBooks']);
-        Route::put('/{book}', [BookController::class, 'update']);
-        Route::delete('/{book}', [BookController::class, 'deleteBook']);
+        
+        // Routes that require teacher role
+        Route::middleware('teacher')->group(function () {
+            Route::post('/add', [BookController::class, 'add']);
+            Route::post('/add-multiple', [BookController::class, 'addMultiple']);
+            Route::get('/export', [BookController::class, 'exportBooks']);
+            Route::put('/{book}', [BookController::class, 'update']);
+            Route::delete('/{book}', [BookController::class, 'deleteBook']);
+        });
     });
     
-    Route::prefix('excel-imports')->group(function () {
+    // Excel import routes (teachers only)
+    Route::middleware('teacher')->prefix('excel-imports')->group(function () {
         Route::post('/upload', [BookImportController::class, 'uploadExcel']);
         Route::get('/files', [BookImportController::class, 'getExcelFiles']);
         Route::delete('/file/{fileId}', [BookImportController::class, 'deleteExcelFile']);
@@ -58,7 +63,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/template', [BookImportController::class, 'downloadTemplate']);
     });
     
-    Route::prefix('categories')->group(function () {
+    // Category management (teachers only)
+    Route::middleware('teacher')->prefix('categories')->group(function () {
         Route::post('/', [CategoryController::class, 'store']);
     });
 });
