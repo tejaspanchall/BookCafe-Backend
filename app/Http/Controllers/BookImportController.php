@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\Book;
 use App\Models\Author;
 use App\Models\Category;
+use App\Models\ExcelImport;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -42,6 +43,13 @@ class BookImportController extends Controller
             $filename = time() . '_' . $file->getClientOriginalName();
             $path = $file->storeAs('excel_imports', $filename, 'public');
 
+            // Store file information in database
+            $excelImport = ExcelImport::create([
+                'teacher_id' => Auth::id(),
+                'file_id' => $filename,
+                'original_name' => $file->getClientOriginalName()
+            ]);
+
             return response()->json([
                 'status' => 'success',
                 'message' => 'Excel file uploaded successfully',
@@ -68,30 +76,20 @@ class BookImportController extends Controller
         }
 
         try {
-            $files = Storage::disk('public')->files('excel_imports');
-            $fileDetails = [];
-
-            foreach ($files as $file) {
-                $filename = pathinfo($file, PATHINFO_BASENAME);
-                $originalName = preg_replace('/^\d+_/', '', $filename);
-                $timestamp = intval(substr($filename, 0, strpos($filename, '_')));
-                $date = date('Y-m-d H:i:s', $timestamp);
-
-                $fileDetails[] = [
-                    'file_id' => $filename,
-                    'original_name' => $originalName,
-                    'uploaded_at' => $date,
-                ];
-            }
-
-            // Sort by upload time, newest first
-            usort($fileDetails, function($a, $b) {
-                return strtotime($b['uploaded_at']) - strtotime($a['uploaded_at']);
-            });
+            $files = ExcelImport::where('teacher_id', Auth::id())
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($file) {
+                    return [
+                        'file_id' => $file->file_id,
+                        'original_name' => $file->original_name,
+                        'uploaded_at' => $file->created_at->toDateTimeString(),
+                    ];
+                });
 
             return response()->json([
                 'status' => 'success',
-                'files' => $fileDetails
+                'files' => $files
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -112,16 +110,24 @@ class BookImportController extends Controller
         }
 
         try {
-            $filePath = 'excel_imports/' . $fileId;
-            
-            if (!Storage::disk('public')->exists($filePath)) {
+            $excelImport = ExcelImport::where('file_id', $fileId)
+                ->where('teacher_id', Auth::id())
+                ->first();
+
+            if (!$excelImport) {
                 return response()->json([
                     'status' => 'error',
-                    'message' => 'File not found'
+                    'message' => 'File not found or unauthorized'
                 ], Response::HTTP_NOT_FOUND);
             }
 
-            Storage::disk('public')->delete($filePath);
+            $filePath = 'excel_imports/' . $fileId;
+            
+            if (Storage::disk('public')->exists($filePath)) {
+                Storage::disk('public')->delete($filePath);
+            }
+
+            $excelImport->delete();
 
             return response()->json([
                 'status' => 'success',
@@ -146,6 +152,18 @@ class BookImportController extends Controller
         if (Auth::user()->role !== 'teacher') {
             \Log::warning('Unauthorized attempt to import books - user is not a teacher');
             return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        // Verify file ownership
+        $excelImport = ExcelImport::where('file_id', $fileId)
+            ->where('teacher_id', Auth::id())
+            ->first();
+
+        if (!$excelImport) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'File not found or unauthorized'
+            ], Response::HTTP_NOT_FOUND);
         }
 
         // Check database connection before proceeding
