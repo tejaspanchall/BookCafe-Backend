@@ -43,6 +43,7 @@ class BookController extends Controller
             $book->description = $request->description;
             $book->price = $request->price;
             $book->created_at = now();
+            $book->created_by = Auth::id();
 
             if ($request->hasFile('image')) {
                 $image = $request->file('image');
@@ -133,6 +134,7 @@ class BookController extends Controller
                 $book->description = $bookData['description'] ?? null;
                 $book->price = $bookData['price'] ?? null;
                 $book->created_at = now();
+                $book->created_by = Auth::id();
                 $book->save();
 
                 // Handle authors
@@ -250,11 +252,33 @@ class BookController extends Controller
                 'books' => $booksWithUrls
             ]);
         } catch (\Exception $e) {
-            \Log::error('Error fetching user library: ' . $e->getMessage());
-            $books = Auth::user()->books()
-                ->with(['users', 'categories', 'authors'])
-                ->orderBy('books.created_at', 'desc')
-                ->get();
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve books',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Get recently added books by the authenticated user
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getRecentBooks()
+    {
+        try {
+            $userId = Auth::id();
+            $books = $this->getCachedBookData("books:user:{$userId}:recent", 300, function() use ($userId) {
+                $query = Book::query()
+                    ->with(['categories', 'authors'])
+                    ->where('created_by', $userId)
+                    ->orderBy('created_at', 'desc')
+                    ->limit(10);
+
+                return $query->get();
+            });
+            
             $booksWithUrls = $books->map(function($book) {
                 $book->image_url = $book->image 
                     ? url('storage/books/' . urlencode($book->image))
@@ -266,6 +290,12 @@ class BookController extends Controller
                 'status' => 'success',
                 'books' => $booksWithUrls
             ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve recent books',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
     }
 

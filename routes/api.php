@@ -40,6 +40,7 @@ Route::prefix('auth')->group(function () {
 Route::middleware('auth:sanctum')->group(function () {
     Route::prefix('books')->group(function () {
         Route::get('/my-library', [BookController::class, 'myLibrary']);
+        Route::get('/recent', [BookController::class, 'getRecentBooks']);
         Route::post('/{book}/add-to-library', [BookController::class, 'addToLibrary']);
         Route::delete('/{book}/remove-from-library', [BookController::class, 'removeFromLibrary']);
         Route::get('/get-library', [BookController::class, 'getLibrary']);
