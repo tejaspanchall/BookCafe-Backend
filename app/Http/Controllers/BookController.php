@@ -64,16 +64,11 @@ class BookController extends Controller
                 $this->syncCategories($book, $request->categories);
             }
 
-            $imageUrl = $book->image 
-                ? url('storage/books/' . urlencode($book->image))
-                : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
-
             $this->refreshBookCaches();
 
             return response()->json([
                 'status' => 'success',
                 'book' => $book->load(['categories', 'authors']),
-                'image_url' => $imageUrl
             ], Response::HTTP_CREATED);
         } catch (\Exception $e) {
             return response()->json([
@@ -279,16 +274,9 @@ class BookController extends Controller
                 return $query->get();
             });
             
-            $booksWithUrls = $books->map(function($book) {
-                $book->image_url = $book->image 
-                    ? url('storage/books/' . urlencode($book->image))
-                    : "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==";
-                return $book;
-            });
-
             return response()->json([
                 'status' => 'success',
-                'books' => $booksWithUrls
+                'books' => $books
             ]);
         } catch (\Exception $e) {
             return response()->json([

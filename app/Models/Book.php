@@ -80,9 +80,8 @@ class Book extends Model
             return $this->image;
         }
         
-        // Return just the image path relative to the storage folder
-        // The frontend will construct the full URL
-        return $this->image;
+        // For local files, construct the full URL
+        return url('storage/books/' . urlencode($this->image));
     }
 
     /**
