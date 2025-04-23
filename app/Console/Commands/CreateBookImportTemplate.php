@@ -49,7 +49,7 @@ class CreateBookImportTemplate extends Command
             
             // Get the active sheet
             $sheet = $spreadsheet->getActiveSheet();
-            $sheet->setTitle('Book Import Template');
+            $sheet->setTitle('Book Import');
 
             // Define headers
             $headers = ['Title', 'ISBN', 'Authors', 'Description', 'Categories', 'Price', 'Image_URL'];
@@ -87,6 +87,84 @@ class CreateBookImportTemplate extends Command
             $sheet->getColumnDimension('E')->setWidth(30); // Categories
             $sheet->getColumnDimension('F')->setWidth(15); // Price
             $sheet->getColumnDimension('G')->setWidth(40); // Image URL
+
+            // Create Instructions sheet
+            $instructionSheet = $spreadsheet->createSheet();
+            $instructionSheet->setTitle('Instructions & Sample');
+
+            // Add sample data first
+            $instructions = [
+                ['Title', 'ISBN', 'Authors', 'Description', 'Categories', 'Price', 'Image_URL'],
+                ['The Great Gatsby', '9780743273565', 'F. Scott Fitzgerald', 'A story of decadence and excess', 'Fiction, Classics', '9.99', 'https://example.com/gatsby.jpg'],
+                ['Clean Code', '9780132350884', 'Robert C. Martin', 'Guide to writing clean code', 'Programming, Software Development', '29.99', 'https://example.com/cleancode.jpg'],
+                ['Harry Potter and the Sorcerer\'s Stone', '9780590353427', 'J.K. Rowling', 'The story of a young wizard', 'Fantasy, Young Adult', '14.99', 'https://example.com/harrypotter.jpg'],
+                [''],
+                [''],
+                ['Instructions for Book Import'],
+                [''],
+                ['1. Use the "Book Import" sheet to enter your book data'],
+                ['2. Required fields:'],
+                ['   - Title: Book title (required)'],
+                ['   - ISBN: Unique identifier (required)'],
+                ['   - Authors: Comma-separated list of authors (required)'],
+                ['3. Optional fields:'],
+                ['   - Description: Book description'],
+                ['   - Categories: Comma-separated list of categories'],
+                ['   - Price: Book price (numeric value)'],
+                ['   - Image_URL: URL to book cover image'],
+                [''],
+                ['Notes:'],
+                ['- Multiple authors should be separated by commas (e.g., "Author One, Author Two")'],
+                ['- Multiple categories should be separated by commas (e.g., "Fiction, Mystery, Thriller")'],
+                ['- Price should be a numeric value without currency symbols'],
+                ['- Image URL should be a valid web URL to the book cover image']
+            ];
+
+            $instructionSheet->fromArray($instructions, null, 'A1');
+
+            // Style the header row (first row) with background color
+            $headerStyle = [
+                'font' => [
+                    'bold' => true,
+                    'color' => ['rgb' => 'FFFFFF'],
+                    'size' => 12,
+                ],
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => '2C3E50'],
+                ],
+                'alignment' => [
+                    'horizontal' => Alignment::HORIZONTAL_CENTER,
+                    'vertical' => Alignment::VERTICAL_CENTER,
+                ],
+                'borders' => [
+                    'allBorders' => [
+                        'borderStyle' => Border::BORDER_THIN,
+                        'color' => ['rgb' => 'BDC3C7'],
+                    ],
+                ],
+            ];
+            $instructionSheet->getStyle('A1:G1')->applyFromArray($headerStyle);
+            
+            // Style the instruction heading
+            $instructionSheet->getStyle('A7')->getFont()->setBold(true)->setSize(14);
+            
+            // Set column widths for instruction sheet
+            foreach (range('A', 'G') as $column) {
+                $instructionSheet->getColumnDimension($column)->setAutoSize(true);
+            }
+
+            // Add light gray background to the sample data rows
+            $sampleDataStyle = [
+                'fill' => [
+                    'fillType' => Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'F5F5F5'],
+                ],
+            ];
+            $instructionSheet->getStyle('A2:G4')->applyFromArray($sampleDataStyle);
+
+            // Set the first sheet as active
+            $spreadsheet->setActiveSheetIndex(0);
 
             // Create the Excel file
             $writer = new Xlsx($spreadsheet);

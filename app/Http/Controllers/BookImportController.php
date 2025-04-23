@@ -192,7 +192,8 @@ class BookImportController extends Controller
 
         try {
             $spreadsheet = IOFactory::load($file);
-            $worksheet = $spreadsheet->getActiveSheet();
+            // Get the first sheet directly
+            $worksheet = $spreadsheet->getSheet(0);
             $rows = $worksheet->toArray();
             \Log::info('Excel file loaded successfully. Total rows: ' . count($rows));
             

@@ -69,7 +69,8 @@ class ProcessBookImport extends Command
         
         try {
             $spreadsheet = IOFactory::load($file);
-            $worksheet = $spreadsheet->getActiveSheet();
+            // Get the first sheet directly
+            $worksheet = $spreadsheet->getSheet(0);
             $rows = $worksheet->toArray();
             $this->info('Excel file loaded successfully. Total rows: ' . count($rows));
             Log::info('Excel file loaded successfully. Total rows: ' . count($rows));
