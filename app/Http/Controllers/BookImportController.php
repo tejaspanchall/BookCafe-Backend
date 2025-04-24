@@ -318,8 +318,9 @@ class BookImportController extends Controller
                             $book->image = null; // Set default null image
                         }
                         
-                        // Set the created_at timestamp to now
+                        // Set the created_at timestamp and created_by to current user
                         $book->created_at = now();
+                        $book->created_by = Auth::id();
                         \Log::info("Row $rowNum: About to save book");
                         
                         // Temporarily disable trigger to avoid search_vector issues

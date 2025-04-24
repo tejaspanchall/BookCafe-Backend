@@ -19,7 +19,7 @@ class ProcessBookImport extends Command
      *
      * @var string
      */
-    protected $signature = 'books:import-excel {file? : The name of the Excel file in storage/app/public/excel_imports}';
+    protected $signature = 'books:import-excel {file? : The name of the Excel file in storage/app/public/excel_imports} {user_id? : The ID of the user creating the books}';
 
     /**
      * The console command description.
@@ -170,6 +170,7 @@ class ProcessBookImport extends Command
                             ? $row[$headerMap['image_url']]
                             : null;
                         $book->created_at = now();
+                        $book->created_by = $this->argument('user_id') ?? 1; // Default to first user if not specified
                         
                         // Temporarily disable trigger to avoid search_vector issues
                         try {
