@@ -30,7 +30,7 @@ class AddFullTextSearchToBooks extends Migration
                 -- Get author names for the book
                 SELECT string_agg(a.name, \' \')
                 INTO author_names
-                FROM book_author ba
+                FROM book_authors ba
                 JOIN authors a ON a.id = ba.author_id
                 WHERE ba.book_id = NEW.id;
 
@@ -60,7 +60,7 @@ class AddFullTextSearchToBooks extends Migration
                     setweight(to_tsvector(\'english\', COALESCE(b.title, \'\')), \'A\') ||
                     setweight(to_tsvector(\'english\', COALESCE(b.isbn, \'\')), \'B\') ||
                     setweight(to_tsvector(\'english\', COALESCE(string_agg(a.name, \' \'), \'\')), \'C\')
-                FROM book_author ba
+                FROM book_authors ba
                 JOIN authors a ON a.id = ba.author_id
                 WHERE ba.book_id = b.id
                 GROUP BY b.id

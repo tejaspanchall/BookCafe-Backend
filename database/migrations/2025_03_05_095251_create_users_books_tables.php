@@ -8,16 +8,6 @@ class CreateUsersBooksTables extends Migration
 {
     public function up()
     {
-        Schema::create('users', function (Blueprint $table) {
-            $table->id();
-            $table->string('firstname', 50);
-            $table->string('lastname', 50);
-            $table->string('email', 100)->unique();
-            $table->string('password');
-            $table->string('reset_token', 64)->nullable();
-            $table->enum('role', ['teacher', 'student'])->default('student');
-        });
-
         Schema::create('books', function (Blueprint $table) {
             $table->id();
             $table->string('title', 255);
@@ -43,6 +33,5 @@ class CreateUsersBooksTables extends Migration
     {
         Schema::dropIfExists('user_books');
         Schema::dropIfExists('books');
-        Schema::dropIfExists('users');
     }
 }
