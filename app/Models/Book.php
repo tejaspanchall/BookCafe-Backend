@@ -30,7 +30,8 @@ class Book extends Model
         'description',
         'isbn',
         'price',
-        'created_at'
+        'created_at',
+        'is_live'
     ];
 
     /**

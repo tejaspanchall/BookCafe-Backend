@@ -49,6 +49,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/export', [BookController::class, 'exportBooks']);
         Route::put('/{book}', [BookController::class, 'update']);
         Route::delete('/{book}', [BookController::class, 'deleteBook']);
+        Route::post('/{book}/toggle-live', [BookController::class, 'toggleLive']);
     });
     
     Route::prefix('excel-imports')->group(function () {

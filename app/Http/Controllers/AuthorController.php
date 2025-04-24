@@ -76,7 +76,10 @@ class AuthorController extends Controller
             $author = Author::findOrFail($id);
             
             $books = $this->getCachedBookData("author:{$id}:books", self::CACHE_DURATION, function() use ($author) {
-                return $author->books()->with(['categories', 'authors'])->get();
+                return $author->books()
+                    ->with(['categories', 'authors'])
+                    ->where('is_live', true)
+                    ->get();
             });
             
             $booksWithUrls = $books->map(function($book) {

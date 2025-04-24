@@ -25,6 +25,17 @@ class BookSeeder extends Seeder
         Book::truncate();
         Schema::enableForeignKeyConstraints();
         
+        // Get or create a teacher user for the seeder
+        $teacher = \App\Models\User::firstOrCreate(
+            ['email' => 'admin@bookcafe.com'],
+            [
+                'name' => 'Admin',
+                'password' => bcrypt('password'),
+                'role' => 'teacher'
+            ]
+        );
+        $teacherId = $teacher->id;
+        
         // Additional authors dictionary to use for multiple authors assignment
         $coauthors = [
             'Fiction' => ['Alice Walker', 'Joyce Carol Oates', 'Philip Roth', 'Toni Morrison', 'Salman Rushdie', 'Margaret Atwood'],
@@ -520,13 +531,16 @@ class BookSeeder extends Seeder
         foreach ($books as $bookData) {
             try {
                 // Create book without author and category fields
-                $book = Book::create([
-                    'title' => $bookData['title'],
-                    'description' => $bookData['description'],
-                    'image' => $bookData['image'],
-                    'price' => $bookData['price'],
-                    'isbn' => $this->generateUniqueIsbn(),
-                ]);
+                $book = new Book();
+                $book->title = $bookData['title'];
+                $book->isbn = $this->generateUniqueIsbn();
+                $book->description = $bookData['description'];
+                $book->image = $bookData['image'];
+                $book->price = $bookData['price'];
+                $book->created_at = now();
+                $book->created_by = $teacherId;
+                $book->is_live = true;  // Set seeded books to live by default
+                $book->save();
                 
                 // Create or find categories and associate them with the book
                 foreach ($bookData['categories'] as $categoryName) {

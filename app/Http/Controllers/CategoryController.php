@@ -76,7 +76,10 @@ class CategoryController extends Controller
             $category = Category::findOrFail($id);
             
             $books = $this->getCachedBookData("category:{$id}:books", self::CACHE_DURATION, function() use ($category) {
-                return $category->books()->with(['categories', 'authors'])->get();
+                return $category->books()
+                    ->with(['categories', 'authors'])
+                    ->where('is_live', true)
+                    ->get();
             });
             
             $booksWithUrls = $books->map(function($book) {

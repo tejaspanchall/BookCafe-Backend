@@ -44,6 +44,7 @@ class BookController extends Controller
             $book->price = $request->price;
             $book->created_at = now();
             $book->created_by = Auth::id();
+            $book->is_live = false;
 
             if ($request->hasFile('image')) {
                 $image = $request->file('image');
@@ -130,6 +131,7 @@ class BookController extends Controller
                 $book->price = $bookData['price'] ?? null;
                 $book->created_at = now();
                 $book->created_by = Auth::id();
+                $book->is_live = false;
                 $book->save();
 
                 // Handle authors
@@ -177,6 +179,7 @@ class BookController extends Controller
         try {
             // Bypass cache and get books directly from the database
             $books = Book::with(['users', 'categories', 'authors'])
+                ->where('is_live', true)
                 ->orderBy('created_at', 'desc')
                 ->get();
             
@@ -527,7 +530,9 @@ class BookController extends Controller
             $cacheKey = "books:search:{$type}:{$query}";
             
             $books = $this->getCachedBookData($cacheKey, self::CACHE_DURATION, function() use ($query, $type) {
-                $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
+                $bookQuery = Book::query()
+                    ->with(['users', 'categories', 'authors'])
+                    ->where('is_live', true); // Only return live books
                 
                 // Apply different search criteria based on type
                 switch($type) {
@@ -568,7 +573,9 @@ class BookController extends Controller
             \Log::error('Error searching books: ' . $e->getMessage());
             
             // Fallback to basic search if full-text search fails
-            $bookQuery = Book::query()->with(['users', 'categories', 'authors']);
+            $bookQuery = Book::query()
+                ->with(['users', 'categories', 'authors'])
+                ->where('is_live', true); // Only return live books
             $lowercaseQuery = strtolower($query);
             $words = array_filter(explode(' ', $lowercaseQuery), function($word) {
                 return strlen($word) > 2;
@@ -1068,6 +1075,35 @@ class BookController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to export books',
+                'error' => $e->getMessage()
+            ], Response::HTTP_INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    /**
+     * Toggle the live status of a book
+     */
+    public function toggleLive(Book $book)
+    {
+        if (Auth::user()->role !== 'teacher') {
+            return response()->json(['error' => 'Unauthorized. Teachers only.'], Response::HTTP_FORBIDDEN);
+        }
+
+        try {
+            $book->is_live = !$book->is_live;
+            $book->save();
+
+            $this->refreshBookCaches();
+
+            return response()->json([
+                'status' => 'success',
+                'book' => $book->load(['categories', 'authors']),
+                'message' => $book->is_live ? 'Book is now live' : 'Book is now hidden'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to toggle book status',
                 'error' => $e->getMessage()
             ], Response::HTTP_INTERNAL_SERVER_ERROR);
         }
