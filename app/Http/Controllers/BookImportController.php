@@ -321,6 +321,7 @@ class BookImportController extends Controller
                         // Set the created_at timestamp and created_by to current user
                         $book->created_at = now();
                         $book->created_by = Auth::id();
+                        $book->is_live = false; // Set imported books to not live by default
                         \Log::info("Row $rowNum: About to save book");
                         
                         // Temporarily disable trigger to avoid search_vector issues
@@ -353,7 +354,8 @@ class BookImportController extends Controller
                                     'description' => $book->description,
                                     'price' => $book->price,
                                     'image' => $book->image,
-                                    'created_at' => now()
+                                    'created_at' => now(),
+                                    'is_live' => false // Set imported books to not live by default
                                 ]);
                                 
                                 if ($bookId) {

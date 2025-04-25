@@ -1011,8 +1011,13 @@ class BookController extends Controller
         }
 
         try {
-            // Get all books with their relationships
-            $books = Book::with(['authors', 'categories'])->get();
+            // Get recent books (10 most recent books created by the authenticated user)
+            $books = Book::query()
+                ->with(['categories', 'authors'])
+                ->where('created_by', Auth::id())
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
             
             // Create a new spreadsheet
             $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
@@ -1025,6 +1030,7 @@ class BookController extends Controller
             $sheet->setCellValue('D1', 'Categories');
             $sheet->setCellValue('E1', 'Description');
             $sheet->setCellValue('F1', 'Price');
+            $sheet->setCellValue('G1', 'Image URL');
             
             // Style headers
             $headerStyle = [
@@ -1034,7 +1040,7 @@ class BookController extends Controller
                     'startColor' => ['rgb' => 'E9E9E9']
                 ]
             ];
-            $sheet->getStyle('A1:F1')->applyFromArray($headerStyle);
+            $sheet->getStyle('A1:G1')->applyFromArray($headerStyle);
             
             // Add data
             $row = 2;
@@ -1053,11 +1059,27 @@ class BookController extends Controller
                 $sheet->setCellValue('E' . $row, $book->description);
                 $sheet->setCellValue('F' . $row, $book->price);
                 
+                // Add image URL/path
+                $imageInfo = $book->image;
+                if ($imageInfo) {
+                    // Check if it's a URL (imported book) or a file path (manually uploaded)
+                    if (filter_var($imageInfo, FILTER_VALIDATE_URL)) {
+                        // For imported books, keep the URL as is
+                        $imageValue = $imageInfo;
+                    } else {
+                        // For manually uploaded books, provide the storage path
+                        $imageValue = 'storage/books/' . $imageInfo;
+                    }
+                } else {
+                    $imageValue = '';
+                }
+                $sheet->setCellValue('G' . $row, $imageValue);
+                
                 $row++;
             }
             
             // Auto-size columns
-            foreach (range('A', 'F') as $column) {
+            foreach (range('A', 'G') as $column) {
                 $sheet->getColumnDimension($column)->setAutoSize(true);
             }
             
@@ -1069,7 +1091,7 @@ class BookController extends Controller
             $writer->save($tempFilePath);
             
             // Return file download response
-            return response()->download($tempFilePath, 'books_export_' . date('Y-m-d') . '.xlsx')
+            return response()->download($tempFilePath, 'recent_books_export_' . date('Y-m-d') . '.xlsx')
                 ->deleteFileAfterSend(true);
         } catch (\Exception $e) {
             return response()->json([
