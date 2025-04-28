@@ -267,15 +267,13 @@ class BookController extends Controller
     {
         try {
             $userId = Auth::id();
-            $books = $this->getCachedBookData("books:user:{$userId}:recent", 300, function() use ($userId) {
-                $query = Book::query()
-                    ->with(['categories', 'authors'])
-                    ->where('created_by', $userId)
-                    ->orderBy('created_at', 'desc')
-                    ->limit(10);
-
-                return $query->get();
-            });
+            // Directly fetch recent books without caching for immediate updates
+            $books = Book::query()
+                ->with(['categories', 'authors'])
+                ->where('created_by', $userId)
+                ->orderBy('created_at', 'desc')
+                ->limit(10)
+                ->get();
             
             return response()->json([
                 'status' => 'success',
