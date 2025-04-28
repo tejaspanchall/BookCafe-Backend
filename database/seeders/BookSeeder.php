@@ -29,7 +29,8 @@ class BookSeeder extends Seeder
         $teacher = \App\Models\User::firstOrCreate(
             ['email' => 'admin@bookcafe.com'],
             [
-                'name' => 'Admin',
+                'firstname' => 'Admin',
+                'lastname' => 'User',
                 'password' => bcrypt('password'),
                 'role' => 'teacher'
             ]
