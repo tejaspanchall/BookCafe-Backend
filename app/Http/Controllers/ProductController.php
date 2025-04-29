@@ -91,28 +91,35 @@ class ProductController extends Controller
             // Begin transaction
             DB::beginTransaction();
             
-            // Use raw query with CTE to update product and stock in one transaction
-            $result = DB::select("
-                WITH updated_product AS (
-                    UPDATE dmi_products
-                    SET name = ?, category = ?, price = ?
-                    WHERE id = ?
-                    RETURNING id
-                )
-                INSERT INTO product_stock (product_id, stock_value)
-                VALUES (?, ?)
-                ON CONFLICT (product_id) 
-                DO UPDATE SET stock_value = ?
-                RETURNING product_id
+            // Update product
+            DB::update("
+                UPDATE dmi_products
+                SET name = ?, category = ?, price = ?
+                WHERE id = ?
             ", [
                 $validated['name'],
                 $validated['category'],
                 $validated['price'],
-                $id,
-                $id,
-                $stockValue,
-                $stockValue
+                $id
             ]);
+            
+            // Check if stock exists and update or insert accordingly
+            $stockExists = DB::table('product_stock')->where('product_id', $id)->exists();
+            
+            if ($stockExists) {
+                // Update existing stock
+                DB::update("
+                    UPDATE product_stock 
+                    SET stock_value = ?
+                    WHERE product_id = ?
+                ", [$stockValue, $id]);
+            } else {
+                // Insert new stock
+                DB::insert("
+                    INSERT INTO product_stock (product_id, stock_value)
+                    VALUES (?, ?)
+                ", [$id, $stockValue]);
+            }
             
             // Commit transaction
             DB::commit();
