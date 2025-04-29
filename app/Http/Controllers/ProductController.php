@@ -24,4 +24,10 @@ class ProductController extends Controller
             
         return response()->json($products);
     }
+    
+    public function getStock($id): JsonResponse
+    {
+        $product = Product::findOrFail($id);
+        return response()->json($product);
+    }
 } 
