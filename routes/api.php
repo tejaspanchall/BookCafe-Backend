@@ -6,6 +6,7 @@ use App\Http\Controllers\BookController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\AuthorController;
 use App\Http\Controllers\BookImportController;
+use App\Http\Controllers\ProductController;
 
 Route::prefix('books')->group(function () {
     Route::get('/search', [BookController::class, 'search']);
@@ -64,3 +65,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/', [CategoryController::class, 'store']);
     });
 });
+
+Route::get('/products', [ProductController::class, 'index']);
+Route::get('/products/search', [ProductController::class, 'search']);
